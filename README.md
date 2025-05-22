@@ -1,6 +1,6 @@
 # Movie Scraper & Organizer
 
-A Streamlit-based desktop application designed to automatically fetch metadata and artwork for movie files, organize them, and generate NFO files compatible with media managers like Kodi, Plex, Jellyfin, etc.
+A Streamlit-based desktop application designed to automatically fetch metadata and artwork for movie files, organize them, and generate NFO files compatible with media managers.
 
 ## Features
 
