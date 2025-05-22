@@ -40,7 +40,7 @@ A Streamlit-based web application designed to automatically fetch metadata and a
 1.  **Clone the repository:**
     ```bash
     git clone https://github.com/Morv55555/JavOrganizer.git
-    cd your-repository-name
+    cd JavOrganizer
     ```
 
 2.  **Create a virtual environment (recommended):**
