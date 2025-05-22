@@ -15,7 +15,7 @@ A Streamlit-based web application designed to automatically fetch metadata and a
     *   Creates `.nfo` files in a format compatible with popular media centers.
     *   Includes all scraped metadata, actor details, and links to downloaded artwork.
 *   **File Organization:**
-    *   **Standard Mode:** Moves processed movie files and their associated metadata/artwork into new, neatly named subfolders within a specified output directory (e.g., `[ID] [Studio] - Title/`).
+    *   **Standard Mode:** Moves processed movie files and their associated metadata/artwork into new, neatly named subfolders within a specified output directory.
     *   **Recursive Mode:** Scans an input directory and its subfolders. Instead of moving files, it places NFO files and artwork directly alongside the original movie files in their existing locations.
 *   **Metadata Editing:**
     *   Built-in editor to review and modify scraped data before final organization.
