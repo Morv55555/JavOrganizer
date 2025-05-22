@@ -22,10 +22,7 @@ A Streamlit-based web application designed to automatically fetch metadata and a
     *   Manually specify poster URLs.
     *   Re-scrape a movie using a specific URL if the initial automatic scrape was incorrect.
 *   **Translation:**
-    *   Translate titles and descriptions using:
-        *   Google Translate (via `googletrans` library)
-        *   DeepL (requires API key)
-        *   DeepSeek (requires API key)
+    *   Translate titles and descriptions
     *   Option to keep the original description alongside the translated one.
 *   **Customizable Settings:**
     *   Enable/disable specific scrapers.
