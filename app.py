@@ -219,7 +219,7 @@ def sync_settings_from_file_to_state():
     print(f"  Synced genre_blacklist: {st.session_state.get('genre_blacklist')}")
 
 # --- Page Config & Styles ---
-st.set_page_config(page_title="Movie Scraper & Organizer", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="JavOrganizer", layout="wide", initial_sidebar_state="collapsed")
 # --- End Config & Styles ---
 
 # --- Session State Initialization & Settings Loading ---
@@ -1705,6 +1705,93 @@ def save_settings_callback():
     # --- GENRE BLACKLIST ---
 
     save_settings_to_file()
+
+# --- Javlibrary Credentials Dialog Function ---
+@st.dialog(title="Javlibrary Credentials Required")
+def javlibrary_credentials_dialog():
+    st.caption(
+        "Javlibrary scraper is enabled. Please provide your current browser **User-Agent** string "
+        "and a valid **`cf_clearance` cookie value** from `javlibrary.com`. "
+        "You can typically find the User-Agent by searching 'what is my user agent' in your browser, "
+        "and the `cf_clearance` cookie in your browser's developer tools (Application/Storage -> Cookies) "
+        "after successfully solving a challenge on their site."
+    )
+    
+    jl_user_agent_input_val = st.text_input(
+        "Your Browser User-Agent:",
+        key="jl_user_agent_input_dialog", 
+        placeholder="e.g., Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
+        value=st.session_state.get("javlibrary_user_agent", "") 
+    )
+    jl_cf_token_input_val = st.text_input(
+        "CF Clearance Token (from javlibrary.com cookie):",
+        key="jl_cf_token_input_dialog", 
+        value=st.session_state.get("javlibrary_cf_token", "") 
+    )
+
+    if st.button("Save Javlibrary Credentials for this Session", key="save_jl_creds_dialog_button"):
+        if jl_user_agent_input_val and jl_user_agent_input_val.strip() and \
+           jl_cf_token_input_val and jl_cf_token_input_val.strip():
+            
+            st.session_state.javlibrary_user_agent = jl_user_agent_input_val.strip()
+            st.session_state.javlibrary_cf_token = jl_cf_token_input_val.strip()
+            st.session_state.show_javlibrary_prompt = False 
+            st.session_state.javlibrary_creds_provided_this_session = True 
+            
+            st.toast("Javlibrary credentials received. Dialog will close.", icon="✅")
+            st.rerun() 
+        else:
+            st.error("Both User-Agent and CF Clearance Token are required for Javlibrary.", icon="🚫")
+            st.session_state.javlibrary_creds_provided_this_session = False
+# --- End Javlibrary Credentials Dialog Function ---
+
+# --- Re-Scrape Dialog Function ---
+@st.dialog(title="Re-Scrape with Specific URL")
+def rescrape_dialog():
+    st.caption("If the initial scrape was incorrect, select a scraper, provide the correct URL to the movie's page, and fetch new data. This will replace the current movie's metadata.")
+    
+    scraper_options_rescrape = [""] + AVAILABLE_SCRAPER_NAMES 
+    
+    if "rescrape_scraper_select" not in st.session_state:
+        st.session_state.rescrape_scraper_select = scraper_options_rescrape[0] 
+    if "rescrape_url_input" not in st.session_state:
+        st.session_state.rescrape_url_input = ""
+
+    current_rescrape_scraper_idx = 0
+    current_selection = st.session_state.get("rescrape_scraper_select")
+    if current_selection in scraper_options_rescrape:
+        current_rescrape_scraper_idx = scraper_options_rescrape.index(current_selection)
+    else:
+        st.session_state.rescrape_scraper_select = scraper_options_rescrape[0]
+        current_rescrape_scraper_idx = 0
+
+    st.selectbox(
+        "Select Scraper:", 
+        options=scraper_options_rescrape, 
+        index=current_rescrape_scraper_idx,
+        key="rescrape_scraper_select",      
+        help="Choose the scraper corresponding to the URL you provide."
+    )
+    st.text_input(
+        "Movie URL:", 
+        key="rescrape_url_input", 
+        placeholder="e.g., https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=abc00123/",
+        help="Paste the direct URL to the movie's page on the selected scraper's site."
+    )
+    
+    col_action, col_cancel = st.columns(2)
+    with col_action:
+        if st.button(
+            "Manual Re-Crawl", 
+            disabled=(not st.session_state.get("rescrape_scraper_select") or not AVAILABLE_SCRAPER_NAMES),
+            use_container_width=True
+        ):
+            st.session_state.show_rescrape_dialog_actual = False # Mark dialog as done
+            rescrape_with_url_callback() 
+            if not st.session_state.get("show_javlibrary_prompt"): # Avoid double rerun if javlibrary prompt is shown by callback
+                 st.rerun()
+# --- End Re-Scrape Dialog Function ---
+
 # --- End Save Settings Callback ---
 
 # --- Sidebar ---
@@ -1729,53 +1816,15 @@ if st.session_state.current_page == "Crawler":
 
 # --- Main Page Content ---
 if st.session_state.current_page == "Crawler":
-    st.markdown("<h1 style='padding-top: 0px; margin-top: 0px;'>🎬 Movie Scraper & Organizer</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='padding-top: 0px; margin-top: 0px;'>🎬 JavOrganizer</h1>", unsafe_allow_html=True)
 
-    # --- Javlibrary Credentials Prompt UI ---
-    # JAVLIBRARY_AVAILABLE should be a global flag set during scraper import
+# --- Javlibrary Credentials Prompt UI ---
     if st.session_state.get("show_javlibrary_prompt") and \
        ("Javlibrary" in st.session_state.get("enabled_scrapers", []) or \
         st.session_state.get("rescrape_scraper_select") == "Javlibrary") and \
-       JAVLIBRARY_AVAILABLE: # Check if scraper module itself is available
+       JAVLIBRARY_AVAILABLE:
         
-        with st.container(border=True): 
-            st.subheader("Javlibrary Credentials Required for this Session")
-            st.caption(
-                "Javlibrary scraper is enabled. Please provide your current browser **User-Agent** string "
-                "and a valid **`cf_clearance` cookie value** from `javlibrary.com`. "
-                "You can typically find the User-Agent by searching 'what is my user agent' in your browser, "
-                "and the `cf_clearance` cookie in your browser's developer tools (Application/Storage -> Cookies) "
-                "after successfully solving a challenge on their site."
-            )
-            
-            with st.form("javlibrary_credentials_form_main_page"): 
-                jl_user_agent_input_val = st.text_input(
-                    "Your Browser User-Agent:",
-                    key="jl_user_agent_input_crawler_page", 
-                    placeholder="e.g., Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
-                    value=st.session_state.get("javlibrary_user_agent", "") 
-                )
-                jl_cf_token_input_val = st.text_input(
-                    "CF Clearance Token (from javlibrary.com cookie):",
-                    key="jl_cf_token_input_crawler_page", # Unique key for the input widget
-                    value=st.session_state.get("javlibrary_cf_token", "") 
-                )
-                submitted_jl_credentials_main = st.form_submit_button("Save Javlibrary Credentials for this Session")
-
-                if submitted_jl_credentials_main:
-                    if jl_user_agent_input_val and jl_user_agent_input_val.strip() and \
-                       jl_cf_token_input_val and jl_cf_token_input_val.strip():
-                        
-                        st.session_state.javlibrary_user_agent = jl_user_agent_input_val.strip()
-                        st.session_state.javlibrary_cf_token = jl_cf_token_input_val.strip()
-                        st.session_state.show_javlibrary_prompt = False 
-                        st.session_state.javlibrary_creds_provided_this_session = True 
-                        
-                        st.success("Javlibrary credentials received for this session. You can now click 'Run Crawlers' or 'Fetch & Replace'.", icon="✅")
-                        st.rerun() 
-                    else:
-                        st.error("Both User-Agent and CF Clearance Token are required for Javlibrary.", icon="🚫")
-                        st.session_state.javlibrary_creds_provided_this_session = False 
+        javlibrary_credentials_dialog() # Call the decorated function
 
     # --- Inputs: Directories ---
     col_in, col_out = st.columns(2)
@@ -1801,7 +1850,7 @@ if st.session_state.current_page == "Crawler":
 
             with col_btn:
                 # Button with default size
-                submitted_input = st.form_submit_button("▶️ Run Crawlers")
+                submitted_input = st.form_submit_button("Run Crawlers")
 
             with col_cb:
                 # Ensure key exists before accessing
@@ -1832,44 +1881,44 @@ if st.session_state.current_page == "Crawler":
             if output_dir_disabled:
                 st.caption("Output Directory ignored because last crawl used 'Recursive Scan'. Output will be placed next to original files.")
 
-            organize_button_label = "💾 Save & Organize" + (" (Recursive Mode)" if st.session_state.get("last_crawl_was_recursive", False) else "")
+            organize_button_label = "Save & Organize" + (" (Recursive Mode)" if st.session_state.get("last_crawl_was_recursive", False) else "")
             submitted_output = st.form_submit_button(organize_button_label)
             if submitted_output: organize_all_callback()
 
-    # --- View Rendering (based on crawler_view state) ---
+# --- View Rendering (based on crawler_view state) ---
     if st.session_state.crawler_view == "Editor":
         # --- Movie Selection & Navigation ---
         if st.session_state.all_movie_data:
             valid_keys = [fp for fp in st.session_state.all_movie_data.keys() if fp]
             if valid_keys:
-                # Display full path in dropdown if last crawl was recursive for clarity
                 is_recursive_display = st.session_state.get("last_crawl_was_recursive", False)
                 movie_options = {fp: (fp if is_recursive_display else os.path.basename(fp)) for fp in valid_keys}
 
                 if st.session_state.current_movie_key not in movie_options:
                     st.session_state.current_movie_key = valid_keys[0] if valid_keys else None
-                    if st.session_state.current_movie_key: 
-                         st.session_state._apply_changes_triggered = False
+                    if st.session_state.current_movie_key: st.session_state._apply_changes_triggered = False
 
                 current_index = 0
                 if st.session_state.current_movie_key:
-                    try:
-                        current_index = valid_keys.index(st.session_state.current_movie_key)
+                    try: current_index = valid_keys.index(st.session_state.current_movie_key)
                     except ValueError:
                         st.session_state.current_movie_key = valid_keys[0] if valid_keys else None
                         current_index = 0
-                        if st.session_state.current_movie_key: 
-                             st.session_state._apply_changes_triggered = False
+                        if st.session_state.current_movie_key: st.session_state._apply_changes_triggered = False
 
-                nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 5])
-                with nav_col1: st.button("⬅️ Previous", on_click=go_previous_movie, disabled=(current_index == 0 or not st.session_state.current_movie_key), use_container_width=True)
-                with nav_col2: st.button("Next ➡️", on_click=go_next_movie, disabled=(current_index >= len(valid_keys) - 1 or not st.session_state.current_movie_key), use_container_width=True)
+                # Adjust column ratios: Prev, Next, Dropdown, Re-Scrape Button
+                nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 3, 1.5]) # Example ratios
+
+                with nav_col1: 
+                    st.button("Previous", on_click=go_previous_movie, disabled=(current_index == 0 or not st.session_state.current_movie_key), use_container_width=True)
+                with nav_col2: 
+                    st.button("Next", on_click=go_next_movie, disabled=(current_index >= len(valid_keys) - 1 or not st.session_state.current_movie_key), use_container_width=True)
 
                 def update_current_movie_selection():
                     st.session_state.current_movie_key = st.session_state.movie_selector
                     st.session_state._apply_changes_triggered = False 
 
-                with nav_col3:
+                with nav_col3: # Column for the movie selector dropdown
                     st.selectbox("Select Movie:",
                                  options=valid_keys,
                                  format_func=lambda fp: movie_options.get(fp, "Unknown File"),
@@ -1878,25 +1927,26 @@ if st.session_state.current_page == "Crawler":
                                  on_change=update_current_movie_selection, 
                                  label_visibility="collapsed",
                                  disabled=(not valid_keys))
+                
+                with nav_col4: # New column for the Re-Scrape button
+                    if st.button("Manual Re-Crawl", key="open_rescrape_dialog_nav_button", use_container_width=True): # Keep help short
+                        if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
+                            st.session_state.show_rescrape_dialog_actual = True
+                            st.rerun()
+                        else:
+                            st.toast("Please select a movie first.", icon="ℹ️")
 
-                # --- Display Contributing Scrapers --- << MODIFIED SECTION >>
+
+                # --- Display Contributing Scrapers ---
                 if st.session_state.current_movie_key: 
                     data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
                     field_sources = data.get('_field_sources', {}) 
-
                     if field_sources: 
-                        # Get unique scraper names that contributed
                         contributing_scrapers = sorted(list(set(field_sources.values())))
-                        if contributing_scrapers:
-                            st.caption(f"**Sources:** {', '.join([f'**`{s}`**' for s in contributing_scrapers])}") # <-- MODIFIED LINE
-                        else:
-                            st.caption("No specific field sources recorded.")
-                    elif data.get('source') == 'manual':
-                         st.caption("**Source:** Manual Entry (No scrapers found data)") # Indicate manual entry
-                    else:
-                        st.caption("Field source information not available.")
-                # --- End Display Contributing Scrapers ---
-
+                        if contributing_scrapers: st.caption(f"**Sources:** {', '.join([f'**`{s}`**' for s in contributing_scrapers])}")
+                        else: st.caption("No specific field sources recorded.")
+                    elif data.get('source') == 'manual': st.caption("**Source:** Manual Entry (No scrapers found data)")
+                    else: st.caption("Field source information not available.")
             else:
                 st.warning("Movie data dictionary is empty or invalid.")
         elif st.session_state.movie_file_paths:
@@ -1904,19 +1954,21 @@ if st.session_state.current_page == "Crawler":
         else:
             st.info("👋 Welcome! Enter an Input Directory above and click 'Run Crawlers'.")
 
+        # --- Dialog Invocation Logic (should be checked on every run if flag could be set from nav) ---
+        if 'show_rescrape_dialog_actual' not in st.session_state: # Ensure flag exists
+            st.session_state.show_rescrape_dialog_actual = False
+        if st.session_state.get("show_rescrape_dialog_actual"):
+            rescrape_dialog() # This function now manages closing itself by setting the flag
+
         # --- Editor Form ---
         if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
-
             apply_changes_was_triggered = st.session_state.get('_apply_changes_triggered', False)
-
             if apply_changes_was_triggered:
                 st.session_state._apply_changes_triggered = False
             else:
                 # --- Pre-populate session state for editor widgets ---
                 data = st.session_state.all_movie_data[st.session_state.current_movie_key]
-
                 def to_str(val): return str(val) if val is not None else ""
-
                 st.session_state.editor_id = to_str(data.get('id'))
                 st.session_state.editor_content_id = to_str(data.get('content_id'))
                 st.session_state.editor_folder_name = data.get('folder_name', '')
@@ -1935,51 +1987,41 @@ if st.session_state.current_page == "Crawler":
                 st.session_state.editor_genres = ", ".join(to_str(g).strip() for g in genres_list if to_str(g).strip())
                 actresses_list = data.get('actresses', []) or []
                 st.session_state.editor_actresses = ", ".join(to_str(a.get('name', '')).strip() for a in actresses_list if isinstance(a, dict) and to_str(a.get('name', '')).strip())
-
-                # Poster URL Pre-population
                 auto_poster_url = get_auto_poster_url(data)
                 default_poster_input_url = data.get('poster_manual_url');
                 if default_poster_input_url is None: default_poster_input_url = auto_poster_url or ''
                 st.session_state.editor_poster_url = to_str(default_poster_input_url)
-
-                # REMOVED Folder URL Pre-population
-
-                # Store original editor state (only poster now)
                 st.session_state._original_editor_poster_url = st.session_state.editor_poster_url
-                print(f"[DEBUG PREPOP] Stored original editor poster URL: '{st.session_state._original_editor_poster_url}'")
                 # --- End Pre-population Block ---
+            
+            # Note: 'show_rescrape_dialog_actual' initialization is now above the editor form,
+            # because the button triggering it is now in the navigation area.
 
-
-            # --- The Form ---
             with st.form(key="editor_form"):
                 img_col, text_col = st.columns([1.2, 2])
 
-                # --- Image Preview Section ---
                 with img_col:
-                    # Poster Preview
                     display_poster_url = st.session_state.get('editor_poster_url', '')
                     if display_poster_url:
                         data_for_display = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
                         try:
                             abs_display_poster_url = urljoin(data_for_display.get('url', ''), display_poster_url)
                             source_lower = data_for_display.get('source', '').lower()
-                            if source_lower.startswith('r18') or source_lower.startswith('mgs') or source_lower == 'manual': 
-                                st.image(abs_display_poster_url, caption="Poster Preview") 
+                            if source_lower.startswith('r18') or source_lower.startswith('mgs') or source_lower == 'manual':
+                                st.image(abs_display_poster_url, caption="Poster Preview")
                             else:
                                 st.image(abs_display_poster_url, use_container_width=True, caption="Poster Preview")
                         except Exception as img_e: st.warning(f"Could not load poster preview: {img_e}")
-                    else: st.info("No poster image URL provided. Add one below.") 
+                    else: st.info("No poster image URL provided. Add one below.")
 
-
-                # --- Metadata Inputs Column ---
                 with text_col:
                     id_col1, id_col2 = st.columns(2);
                     with id_col1: st.text_input("ID", key="editor_id")
-                    with id_col2: st.text_input("Content ID", key="editor_content_id", help="Internal Scraper ID.")
-                    st.text_input("Folder Name", key="editor_folder_name", help="Output folder name.")
-                    st.text_input("Title", key="editor_title", help="Potentially translated title. Saved directly to NFO title.")
-                    st.text_input("Original Title", key="editor_original_title", help="Original language title (e.g., Japanese).")
-                    st.text_area("Description / Plot", height=120, key="editor_desc", help="Potentially translated/combined description.")
+                    with id_col2: st.text_input("Content ID", key="editor_content_id")
+                    st.text_input("Folder Name", key="editor_folder_name")
+                    st.text_input("Title", key="editor_title")
+                    st.text_input("Original Title", key="editor_original_title")
+                    st.text_area("Description / Plot", height=120, key="editor_desc")
                     col1, col2 = st.columns(2);
                     with col1:
                         st.text_input("Release Year", key="editor_year");
@@ -1990,77 +2032,38 @@ if st.session_state.current_page == "Crawler":
                         st.text_input("Maker/Studio", key="editor_maker");
                         st.text_input("Label", key="editor_label");
                         st.text_input("Series", key="editor_series");
-                        st.text_input("Genres", key="editor_genres"); # Comma-separated input
-                        st.text_input("Actresses", key="editor_actresses") # Comma-separated input
-                    # Only Poster URL input remains
-                    st.text_input("Cover", key="editor_poster_url", help="URL for fanart.jpg. Cleared value uses auto-detected. Manually set value overrides.")
+                        st.text_input("Genres", key="editor_genres");
+                        st.text_input("Actresses", key="editor_actresses")
+                    st.text_input("Cover", key="editor_poster_url")
 
-                    apply_callback_func = apply_changes_callback if ('apply_changes_callback' in globals() and callable(apply_changes_callback)) else None
-                    if apply_callback_func is None:
-                         print("[ERROR] apply_changes_callback function not found!")
-                         st.error("Apply changes callback not defined!")
-                    submitted_edit = st.form_submit_button(
+                    # Apply Changes button (the actual form submit button)
+                    # REMOVED use_container_width=True to revert its size
+                    apply_changes_submitted = st.form_submit_button(
                         "🖊️ Apply Changes",
-                        on_click=apply_callback_func,
-                        disabled=(apply_callback_func is None)
+                        on_click=apply_changes_callback 
                     )
-                    # Callback handles the rest
+            # --- End of st.form() context ---
 
-            # --- Elements outside the form ---
-            # Re-fetch data after potential update
-            data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
+            # The columns for action buttons after the form are no longer needed here,
+            # as the Re-Scrape button has been moved to the navigation area.
 
-            # --- Re-Scrape Section ---
-            
-            # Checkbox to toggle visibility of the re-scrape section
-            st.checkbox("Show Manual Re-Crawl Options", key="show_rescrape_section")
-
-            if st.session_state.get("show_rescrape_section", False): # Check if the checkbox is ticked
-                with st.container(border=True):
-                    st.subheader("Re-Scrape with Specific URL")
-                    st.caption("If the initial scrape was incorrect, select a scraper, provide the correct URL to the movie's page, and fetch new data. This will replace the current movie's metadata.")
-                    
-                    # Use all available scrapers, not just enabled ones for bulk scan
-                    scraper_options_rescrape = [""] + AVAILABLE_SCRAPER_NAMES 
-                    current_rescrape_scraper_idx = 0
-                    if st.session_state.get("rescrape_scraper_select") in scraper_options_rescrape:
-                        current_rescrape_scraper_idx = scraper_options_rescrape.index(st.session_state.rescrape_scraper_select)
-
-                    st.selectbox(
-                        "Select Scraper:", 
-                        options=scraper_options_rescrape, 
-                        index=current_rescrape_scraper_idx,
-                        key="rescrape_scraper_select",
-                        help="Choose the scraper corresponding to the URL you provide."
-                    )
-                    st.text_input(
-                        "Movie URL:", 
-                        key="rescrape_url_input", 
-                        placeholder="e.g., https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=abc00123/",
-                        help="Paste the direct URL to the movie's page on the selected scraper's site."
-                    )
-                    st.button(
-                        "🔄 Fetch & Replace Movie Data", 
-                        on_click=rescrape_with_url_callback, 
-                        disabled=(not st.session_state.get("rescrape_scraper_select") or not AVAILABLE_SCRAPER_NAMES) 
-                    )
-
-            # Per-Movie Checkbox (Unchanged)
+            # --- Per-Movie Checkbox (Unchanged) ---
+            data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {}) # Re-fetch data
             checkbox_key = f"cb_download_all_{st.session_state.current_movie_key}"
-            st.checkbox( "Download all additional images for this movie",
+            st.checkbox( "Download all images for this movie",
                          value=data.get('download_all', False),
                          key=checkbox_key,
                          on_change=update_download_all_flag,
-                         help="Downloads fanart (poster) and additional images. Folder image is always generated from fanart.") # Updated help text
+                         help="Downloads fanart (poster) and images. Folder image is always generated from fanart.")
 
-            # Additional Images display
+            # --- Additional Images display (Unchanged) ---
+            # ... (Your existing screenshot display logic) ...
             screenshots = data.get('screenshot_urls', [])
             if screenshots:
                 auto_poster_url_display = get_auto_poster_url(data)
                 actual_poster_url_displayed = data.get('poster_manual_url', auto_poster_url_display)
                 screenshots_to_display = [ ss_url for ss_url in screenshots if ss_url and ss_url != actual_poster_url_displayed]
                 if screenshots_to_display:
-                    st.markdown("---"); st.subheader("Additional Images")
                     num_screenshots = len(screenshots_to_display); num_cols = min(num_screenshots, 4);
                     if num_cols > 0:
                         cols_imgs = st.columns(num_cols);
@@ -2068,27 +2071,21 @@ if st.session_state.current_page == "Crawler":
                         screenshots_list_source = field_sources.get('screenshot_urls')
                         overall_source = data.get('source', '').lower()
                         no_stretch = False
-                        # Determine stretch based on specific list source first, then overall
                         if screenshots_list_source in ['r18dev', 'r18dev Ja']: no_stretch = True
                         elif overall_source == 'mgs': no_stretch = True
                         elif screenshots_list_source is None and overall_source.startswith('r18'): no_stretch = True
-                        elif overall_source == 'manual': no_stretch = True # Don't stretch if manual
-
+                        elif overall_source == 'manual': no_stretch = True
                         for idx, img_url in enumerate(screenshots_to_display):
                              with cols_imgs[idx % num_cols]:
                                  try:
                                      abs_ss_url = urljoin(data.get('url', ''), img_url)
-                                     if no_stretch:
-                                         st.image(abs_ss_url, caption=f"Image {idx+1}") # No stretch
-                                     else:
-                                         st.image(abs_ss_url, use_container_width=True, caption=f"Image {idx+1}")
+                                     if no_stretch: st.image(abs_ss_url, caption=f"Image {idx+1}")
+                                     else: st.image(abs_ss_url, use_container_width=True, caption=f"Image {idx+1}")
                                  except Exception as ss_e: st.warning(f"Image {idx+1} error: {ss_e}")
-
             elif 'screenshot_urls' in data and not data['screenshot_urls']:
-                 if data.get('poster_manual_url') or data.get('cover_url'): 
+                 if data.get('poster_manual_url') or data.get('cover_url'):
                      st.info("Additional images list is empty. This could be due to a manual Poster URL change, no scraped screenshots, or if the poster was the only image.")
-                 else: # No poster and no screenshots
-                     st.info("No images (poster or screenshots) available for this movie.")
+                 else: st.info("No images (poster or screenshots) available for this movie.")
         # --- End Editor Form conditional block ---
 
     elif st.session_state.crawler_view == "Raw Data":
@@ -2123,7 +2120,7 @@ elif st.session_state.current_page == "Settings":
         st.subheader("Enabled Scrapers")
         st.caption("Select which scrapers to run when 'Run Crawlers' is clicked.")
         for scraper_name in AVAILABLE_SCRAPER_NAMES:
-            specific_help = None # Default to no specific help
+            specific_help = None 
             if scraper_name == "Javlibrary":
                 specific_help = "Requires providing User-Agent and CF Clearance token when prompted on the Crawler page."
             elif scraper_name == "Mgs":
@@ -2133,6 +2130,8 @@ elif st.session_state.current_page == "Settings":
                          value=(scraper_name in st.session_state.get('enabled_scrapers', [])),
                          help=specific_help
                          )
+            
+        st.divider()
 
         # Field Priority
         st.subheader("Field Priority")
@@ -2151,53 +2150,64 @@ elif st.session_state.current_page == "Settings":
                     items_in_this_col = base_items_per_col + (1 if col_idx < remainder else 0)
                     for _ in range(items_in_this_col):
                         if field_idx < total_fields:
-                            # Field key should NOT be 'folder_url' if list is updated
                             field_key, display_label = ordered_fields_with_labels[field_idx]
                             current_priority_list = st.session_state.field_priorities.get(field_key, [])
                             st.text_input(
                                 label=display_label,
-                                key=f"priority_{field_key}", # State automatically updated
-                                value=", ".join(current_priority_list), # Display current value
-                                help=f"Priority for '{display_label}'. Available: {', '.join(AVAILABLE_SCRAPER_NAMES)}"
+                                key=f"priority_{field_key}",
+                                value=", ".join(current_priority_list)
                             )
                             field_idx += 1
                         else: break
         else:
              st.warning("Field priorities not found in session state or settings.")
 
+        st.divider()
+
         st.subheader("Genre Blacklist")
         st.caption("Enter genres to exclude, separated by commas (e.g., Short, Parody, Featured). This is case-insensitive.")
         
-        # Pre-fill the text_area with the current blacklist from session_state, joined as a string.
         current_blacklist_display_str = ", ".join(st.session_state.get("genre_blacklist", []))
         st.text_area(
             "Blacklisted Genres:",
             key="ui_genre_blacklist_input_settings", 
             value=current_blacklist_display_str,
-            height=100,
-            help="Genres listed here will be removed from movie data."
+            height=100
         )
 
-        st.subheader("Translation")
-        # Translation settings (Unchanged)
-        translator_options = ["None", "Google", "DeepL", "DeepSeek"]
-        st.selectbox("Translator Service", options=translator_options, key="translator_service")
-        st.text_input("Target Language Code", key="target_language", help="e.g., EN, DE, FR. Check service documentation for supported codes.")
-        st.text_input("API Key", key="api_key", type="password", help="Required for DeepL and DeepSeek services.")
-        st.checkbox("Translate Title", key="translate_title")
-        col_desc1, col_desc2 = st.columns(2)
-        with col_desc1: st.checkbox("Translate Description", key="translate_description")
-        with col_desc2: st.checkbox("Keep Original Description", key="keep_original_description", help="If 'Translate Description' is also checked, appends translation below original text.")
+        st.divider()
 
+        st.subheader("Translation")
+        translator_options = ["None", "Google", "DeepL", "DeepSeek"]
+        
+        # Row 1 for main translation inputs
+        trans_row1_col1, trans_row1_col2, _ = st.columns(3) # Third column is unused to control width
+        with trans_row1_col1:
+            st.selectbox("Translator Service", options=translator_options, key="translator_service")
+            st.text_input("API Key", key="api_key", type="password", help="Required for DeepL and DeepSeek services.")
+        with trans_row1_col2:
+            st.text_input("Target Language Code", key="target_language", help="e.g., EN, DE, FR. Check service documentation.")
+
+        # Row 2 for translation option checkboxes
+        # These columns will also be 1/3 width each, aligning with the inputs above.
+        trans_row2_col1, trans_row2_col2, _ = st.columns(3) # Third column unused
+        with trans_row2_col1:
+            st.checkbox("Translate Title", key="translate_title") 
+        with trans_row2_col2:
+            st.checkbox("Translate Description", key="translate_description")
+            st.checkbox("Keep Original Description", key="keep_original_description", help="If 'Translate Description' is also checked, appends translation below original text.")
+
+        st.divider()
 
         st.subheader("Directories")
-        # Directories settings
-        current_settings_input_val = st.session_state.get("input_dir", "")
-        st.text_input("Default Input Directory", key="input_dir", help="Set the default path for the 'Input Directory' field on the Crawler page.")
-        current_settings_output_val = st.session_state.get("output_dir", "")
-        st.text_input("Default Output Directory", key="output_dir", help="Set the default path for the 'Output Directory' field on the Crawler page.")
+        # Input and Output Directory next to each other, taking full width of their columns
+        dir_col1, dir_col2 = st.columns(2)
+        with dir_col1:
+            st.text_input("Default Input Directory", key="input_dir")
+        with dir_col2:
+            st.text_input("Default Output Directory", key="output_dir")
 
-        # Save button uses the updated callback
+        # Save button
         save_button = st.form_submit_button("💾 Save All Settings", use_container_width=True, on_click=save_settings_callback)
 
 # --- End Settings Page ---

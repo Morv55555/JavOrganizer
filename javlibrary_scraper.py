@@ -16,7 +16,7 @@ SEARCH_URL_TEMPLATE = f"{BASE_URL}/en/vl_searchbyid.php?keyword={{code}}"
 # REMOVED: USER_AGENT constant
 # REMOVED: CF_CLEARANCE constant
 REVERSE_NAME = True
-SCRAPER_SLEEP_DURATION = 3 # Seconds to wait after scraping this site
+SCRAPER_SLEEP_DURATION = 5 # Seconds to wait after scraping this site
 
 
 # --- Helper to check for Cloudflare challenge ---
