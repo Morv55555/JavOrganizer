@@ -1707,7 +1707,7 @@ def save_settings_callback():
     save_settings_to_file()
 
 # --- Javlibrary Credentials Dialog Function ---
-@st.dialog(title="Javlibrary Credentials Required")
+@st.dialog(title="Javlibrary Credentials Required", width="large")
 def javlibrary_credentials_dialog():
     st.caption(
         "Javlibrary scraper is enabled. Please provide your current browser **User-Agent** string "
@@ -1746,7 +1746,7 @@ def javlibrary_credentials_dialog():
 # --- End Javlibrary Credentials Dialog Function ---
 
 # --- Re-Scrape Dialog Function ---
-@st.dialog(title="Re-Scrape with Specific URL")
+@st.dialog(title="Re-Scrape with Specific URL", width="large")
 def rescrape_dialog():
     st.caption("If the initial scrape was incorrect, select a scraper, provide the correct URL to the movie's page, and fetch new data. This will replace the current movie's metadata.")
     
