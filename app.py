@@ -785,6 +785,27 @@ def process_input_dir_callback():
     field_priorities = latest_settings.get("field_priorities", {})
     print(f"[DEBUG CRAWLER] Using Enabled Scrapers: {enabled_scrapers}")
 
+        # --- Check if enabled scrapers are actually used in priorities ---
+    all_scrapers_in_priority_lists = set()
+    for field_key in app_settings.PRIORITY_FIELDS_ORDERED: # Iterate through defined priority fields
+        if field_key in field_priorities:
+            all_scrapers_in_priority_lists.update(field_priorities[field_key])
+    
+    unused_enabled_scrapers = []
+    for scraper_name in enabled_scrapers:
+        if scraper_name not in all_scrapers_in_priority_lists:
+            unused_enabled_scrapers.append(scraper_name)
+
+    if unused_enabled_scrapers:
+        warning_message = (
+            f"Warning: The following enabled scraper(s) are not listed in any field's priority "
+            f"order in Settings: **{', '.join(unused_enabled_scrapers)}**. "
+            f"Please review your Field Priority settings."
+        )
+        st.warning(warning_message, icon="⚠️")
+        logging.warning(f"Unused enabled scrapers found: {unused_enabled_scrapers}. They are not in any priority list.")
+    # --- END CHECK ---
+
     # --- Javlibrary Credentials Check ---
     if "Javlibrary" in enabled_scrapers and JAVLIBRARY_AVAILABLE:
         if not st.session_state.get("javlibrary_creds_provided_this_session", False):
@@ -1075,7 +1096,9 @@ def process_input_dir_callback():
                 
                 # For folder name, we want the semantic part of the title (translated if applicable)
                 # Use merged_data['title'] (which is potentially translated) as the base for folder name title
-                semantic_title_for_folder_base = merged_data.get('title', merged_data.get('title_raw', 'NO_TITLE'))
+                semantic_title_for_folder_base = merged_data.get('title') or \
+                                 merged_data.get('title_raw') or \
+                                 'NO_TITLE'
                 
                 # If semantic_title_for_folder_base is already prefixed by the ID that was used for scraping, strip it for folder name generation.
                 # This handles cases where a scraper (like Javlibrary) might return "ID - Title" and it gets translated.
