@@ -96,11 +96,49 @@ def scrape_mgs(url):
     # --- Title ---
     title_tag = soup.find('title')
     scraped_title = html.unescape(title_tag.text.strip()) if title_tag else None
-    if scraped_title: scraped_title = re.sub(r' - MGステージアダルト動画(.*)$', '', scraped_title, flags=re.IGNORECASE).strip()
+    
+    if scraped_title:
+        logging.debug(f"Title before cleanup: '{scraped_title}'")
+
+        # Rule 1: Original cleanup for " - MGステージアダルト動画..."
+        # Using a non-capturing group (?:...) for the content after the known suffix start.
+        pattern_mgstage_suffix = r'\s*-\s*MGステージアダルト動画(?:.*)?$' # Made (?:.*) optional with ?
+        original_title_before_mgstage = scraped_title
+        scraped_title = re.sub(pattern_mgstage_suffix, '', scraped_title, flags=re.IGNORECASE).strip()
+        if scraped_title != original_title_before_mgstage:
+            logging.debug(f"Title after MGStage suffix cleanup: '{scraped_title}'")
+
+        # Rule 2: New cleanup for "エロ動画・アダルトビデオ -MGS動画＜プレステージ グループ＞..."
+        # This pattern is designed to be more flexible with internal spacing and hyphen types.
+        # Part 1: "エロ動画・アダルトビデオ"
+        # Separator: optional whitespace, a hyphen character, optional whitespace
+        # Part 2: "MGS動画＜プレステージ グループ＞"
+        # The entire match, along with anything after it, will be removed.
+        
+        # Literal parts of the phrase:
+        prestige_part1 = re.escape("エロ動画・アダルトビデオ")
+        prestige_part2 = re.escape("MGS動画＜プレステージ グループ＞") # Note: space in "プレステージ グループ" is handled by re.escape
+
+        # Flexible hyphen pattern: matches common hyphens U+002D, U+2010, U+FF0D
+        hyphen_pattern = r"[-‐－]" 
+
+        # Combine into the full pattern for the prestige key phrase:
+        # It looks for part1, then flexible_separator, then part2.
+        flexible_prestige_key_phrase_pattern = rf"{prestige_part1}\s*{hyphen_pattern}\s*{prestige_part2}"
+        
+        # Pattern to remove the key phrase and anything that follows it,
+        # preceded by optional whitespace.
+        pattern_prestige_suffix_full = r'\s*(?:' + flexible_prestige_key_phrase_pattern + r')(?:.*)?$' # Made (?:.*) optional with ?
+
+        original_title_before_prestige = scraped_title
+        scraped_title = re.sub(pattern_prestige_suffix_full, '', scraped_title, flags=re.IGNORECASE).strip()
+        if scraped_title != original_title_before_prestige:
+            logging.debug(f"Title after Prestige suffix cleanup: '{scraped_title}'")
+        
     data['title'] = scraped_title
-    data['title_raw'] = scraped_title
+    data['title_raw'] = scraped_title 
     data['originaltitle'] = scraped_title
-    logging.debug(f"Title: {data['title']}")
+    logging.debug(f"Final Title: {data['title']}")
 
     # --- Description ---
     data['description'] = None

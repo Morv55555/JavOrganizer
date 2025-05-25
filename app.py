@@ -874,6 +874,56 @@ def process_input_dir_callback():
     current_jl_cf_token = st.session_state.get("javlibrary_cf_token")
     javlibrary_globally_failed_this_run = False 
 
+    # --- Helper function for running scraper tasks ---
+    def execute_scraper_tasks(id_to_scrape, current_jl_ua, current_jl_cf, enabled_scrapers_list, max_workers_count, current_filename_base_for_status, current_progress_tuple_for_status):
+        nonlocal javlibrary_globally_failed_this_run # Allow modification of the outer scope variable
+        # No need to pass st or st.session_state, can access them directly if needed from outer scope.
+
+        _scraper_results = {}
+        _any_success = False
+        _futures = []
+
+        status_text.text(f"Processing: {current_filename_base_for_status} (ID: {id_to_scrape}) ({current_progress_tuple_for_status[0]}/{current_progress_tuple_for_status[1]}) - Running scrapers...")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers_count) as executor:
+            for scraper_name_iter in enabled_scrapers_list:
+                ua_for_jl_iter = current_jl_ua if scraper_name_iter == "Javlibrary" else None
+                cf_for_jl_iter = current_jl_cf if scraper_name_iter == "Javlibrary" else None
+                
+                future_iter = executor.submit(run_single_scraper_task, scraper_name_iter, id_to_scrape,
+                                            user_agent_for_javlibrary=ua_for_jl_iter,
+                                            cf_token_for_javlibrary=cf_for_jl_iter)
+                _futures.append(future_iter)
+        
+        status_text.text(f"Processing: {current_filename_base_for_status} (ID: {id_to_scrape}) ({current_progress_tuple_for_status[0]}/{current_progress_tuple_for_status[1]}) - Waiting for scrapers...")
+        
+        for future_iter_done in concurrent.futures.as_completed(_futures):
+            try:
+                name_res, data_res = future_iter_done.result()
+                if name_res == "Javlibrary" and data_res == "CF_CHALLENGE":
+                    st.error(f"Javlibrary credentials failed for ID '{id_to_scrape}' (Cloudflare Challenge). You will be prompted again on the next 'Run Crawlers' attempt if Javlibrary remains enabled.", icon="🚨")
+                    st.session_state.javlibrary_creds_provided_this_session = False 
+                    st.session_state.javlibrary_user_agent = None
+                    st.session_state.javlibrary_cf_token = None
+                    javlibrary_globally_failed_this_run = True # Set the global flag
+                    
+                    for f_to_cancel_iter in _futures: # Cancel other pending futures for this ID
+                        if not f_to_cancel_iter.done():
+                            f_to_cancel_iter.cancel()
+                    break # Break from processing results for this ID as JavLib is critical path for this attempt
+
+                if data_res and data_res != "CF_CHALLENGE":
+                    _scraper_results[name_res] = data_res
+                    _any_success = True
+            except concurrent.futures.CancelledError:
+                print(f"A scraper task was cancelled for {current_filename_base_for_status} (ID: {id_to_scrape}).")
+            except Exception as exc_res:
+                print(f"Error retrieving result from future for ID {id_to_scrape}: {exc_res}")
+        
+        return _scraper_results, _any_success
+    # --- End Helper function ---
+
+
     with st.spinner(f"Processing {total_files} movie files..."):
         for i, filepath in enumerate(st.session_state.movie_file_paths):
             if javlibrary_globally_failed_this_run:
@@ -883,66 +933,56 @@ def process_input_dir_callback():
             filename_base = os.path.basename(filepath)
             raw_movie_id_from_filename = os.path.splitext(filename_base)[0]
             original_filename_base_for_nfo = raw_movie_id_from_filename
+            
             sanitized_movie_id = sanitize_id_for_scraper(raw_movie_id_from_filename) 
 
-            if not sanitized_movie_id:
-                 st.warning(f"Could not sanitize ID from filename '{filename_base}', skipping file.")
-                 skipped_manual_entry += 1
+            if not sanitized_movie_id: # If sanitize_id_for_scraper returns None or empty
+                 st.warning(f"Could not derive a valid ID from filename '{filename_base}', skipping file.")
+                 # skipped_manual_entry += 1 # Not a manual entry yet, just a skip.
+                 progress_bar.progress((i + 1) / total_files)
                  continue
 
-            status_text.text(f"Processing: {filename_base} (ID: {sanitized_movie_id}) ({i+1}/{total_files}) - Running Scrapers...")
             scraper_results = {}
             any_scraper_succeeded_for_this_movie = False
-            futures = []
+            id_used_for_successful_scrape = None
+            
+            # --- ATTEMPT 1: Using Sanitized ID ---
+            attempt1_results, attempt1_success = execute_scraper_tasks(
+                sanitized_movie_id, current_jl_user_agent, current_jl_cf_token, enabled_scrapers, max_workers,
+                filename_base, (i+1, total_files) 
+            )
+            
+            if javlibrary_globally_failed_this_run: # Check immediately after helper returns
+                progress_bar.progress((i + 1) / total_files)
+                continue # Skip to next movie file if JavLib globally failed during this attempt
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for scraper_name in enabled_scrapers:
-                    ua_for_jl = current_jl_user_agent if scraper_name == "Javlibrary" else None
-                    cf_for_jl = current_jl_cf_token if scraper_name == "Javlibrary" else None
-                    
-                    future = executor.submit(run_single_scraper_task, scraper_name, sanitized_movie_id,
-                                             user_agent_for_javlibrary=ua_for_jl,
-                                             cf_token_for_javlibrary=cf_for_jl)
-                    futures.append(future)
+            if attempt1_success:
+                scraper_results = attempt1_results
+                any_scraper_succeeded_for_this_movie = True
+                id_used_for_successful_scrape = sanitized_movie_id
+            
+            # --- ATTEMPT 2: Using Raw ID (if Sanitized ID failed, Raw ID is different, and no global JL fail) ---
+            if not any_scraper_succeeded_for_this_movie and \
+               raw_movie_id_from_filename.lower() != sanitized_movie_id.lower() and \
+               not javlibrary_globally_failed_this_run: # Ensure no global failure before trying again
 
-                status_text.text(f"Processing: {filename_base} (ID: {sanitized_movie_id}) ({i+1}/{total_files}) - Waiting for scrapers...")
-                
-                # Flag to stop processing other scrapers *for this specific movie* if Javlibrary fails
-                stop_this_movie_scraper_processing = False
+                attempt2_results, attempt2_success = execute_scraper_tasks(
+                    raw_movie_id_from_filename, current_jl_user_agent, current_jl_cf_token, enabled_scrapers, max_workers,
+                    filename_base, (i+1, total_files) 
+                )
 
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        name, data_result = future.result()
-                        if name == "Javlibrary" and data_result == "CF_CHALLENGE":
-                            st.error(f"Javlibrary credentials failed for ID '{sanitized_movie_id}' (Cloudflare Challenge). You will be prompted again on the next 'Run Crawlers' attempt if Javlibrary remains enabled.", icon="🚨")
-                            st.session_state.javlibrary_creds_provided_this_session = False 
-                            # Clear failed credentials from session to avoid reusing them if user doesn't update
-                            st.session_state.javlibrary_user_agent = None
-                            st.session_state.javlibrary_cf_token = None
-                            javlibrary_globally_failed_this_run = True 
-                            stop_this_movie_scraper_processing = True 
-
-                            # Cancel other pending futures for this specific movie's scrapers
-                            for f_to_cancel in futures:
-                                if not f_to_cancel.done():
-                                    f_to_cancel.cancel()
-                            break 
-
-                        if data_result and data_result != "CF_CHALLENGE":
-                            scraper_results[name] = data_result
-                            any_scraper_succeeded_for_this_movie = True
-                    except concurrent.futures.CancelledError:
-                        print(f"A scraper task was cancelled for {filename_base} (likely due to Javlibrary CF failure).")
-                    except Exception as exc:
-                        print(f"Error retrieving result from future for ID {sanitized_movie_id}: {exc}")
-                
-                if stop_this_movie_scraper_processing: 
-                    progress_bar.progress((i + 1) / total_files) 
+                if javlibrary_globally_failed_this_run: # Check again
+                    progress_bar.progress((i + 1) / total_files)
                     continue 
 
+                if attempt2_success:
+                    scraper_results = attempt2_results
+                    any_scraper_succeeded_for_this_movie = True
+                    id_used_for_successful_scrape = raw_movie_id_from_filename
+            
             # --- Merging and Translation (only if no global CF fail and some scraper succeeded) ---
             if not javlibrary_globally_failed_this_run and any_scraper_succeeded_for_this_movie:
-                status_text.text(f"Processing: {filename_base} (ID: {sanitized_movie_id}) ({i+1}/{total_files}) - Merging data...")
+                status_text.text(f"Processing: {filename_base} (ID: {id_used_for_successful_scrape}) ({i+1}/{total_files}) - Merging data...")
                 merged_data, field_sources = merge_scraped_data(scraper_results, field_priorities) 
 
                 if translation_enabled and translation_possible:
@@ -1014,7 +1054,7 @@ def process_input_dir_callback():
                     
                     if len(filtered_movie_genres) < len(original_genres_for_movie):
                         removed_count = len(original_genres_for_movie) - len(filtered_movie_genres)
-                        log_msg = (f"[GENRE_BLACKLIST] ID '{sanitized_movie_id}': Removed {removed_count}. "
+                        log_msg = (f"[GENRE_BLACKLIST] ID '{id_used_for_successful_scrape}': Removed {removed_count}. "
                                     f"Original: {original_genres_for_movie}, Filtered: {filtered_movie_genres}")
                         logging.info(log_msg) 
                     
@@ -1024,33 +1064,69 @@ def process_input_dir_callback():
 
                 # --- Final Data Preparation ---
                 merged_data['_original_filename_base'] = original_filename_base_for_nfo
-                merged_data['id'] = sanitized_movie_id
+                merged_data['id'] = id_used_for_successful_scrape # Use the ID that resulted in success
                 merged_data['original_filepath'] = filepath
                 merged_data['download_all'] = default_download_state
                 merged_data['_field_sources'] = field_sources
-                semantic_title_for_folder = merged_data.get('title', merged_data.get('title_raw', 'NO_TITLE'))
-                final_id = merged_data.get('id', 'NO_ID')
-                final_studio = merged_data.get('maker', '')
-                final_title = merged_data.get('title', merged_data.get('title_raw', 'NO_TITLE')) 
-                prefix_to_check = f"[{final_id}]"
-                if final_id != 'NO_ID' and final_title and not final_title.lower().startswith(prefix_to_check.lower()):
-                    merged_data['title'] = f"[{final_id}] {final_title}" 
-                elif not final_title and final_id != 'NO_ID':
-                    merged_data['title'] = f"[{final_id}]" 
-                merged_data['folder_name'] = format_and_truncate_folder_name(final_id, final_studio, semantic_title_for_folder) 
+                
+                # semantic_title_for_folder: use the (potentially translated) title for folder name generation
+                # title_raw is the original, non-translated title from the scraper (possibly prefixed)
+                # merged_data['title'] is the current title (potentially translated, possibly prefixed by scraper)
+                
+                # For folder name, we want the semantic part of the title (translated if applicable)
+                # Use merged_data['title'] (which is potentially translated) as the base for folder name title
+                semantic_title_for_folder_base = merged_data.get('title', merged_data.get('title_raw', 'NO_TITLE'))
+                
+                # If semantic_title_for_folder_base is already prefixed by the ID that was used for scraping, strip it for folder name generation.
+                # This handles cases where a scraper (like Javlibrary) might return "ID - Title" and it gets translated.
+                # We want the folder to be "ID [Studio] - Translated Title" not "ID [Studio] - ID - Translated Title"
+                temp_id_prefix_for_strip = f"[{id_used_for_successful_scrape}]" # Check against the ID that worked
+                if semantic_title_for_folder_base.lower().startswith(temp_id_prefix_for_strip.lower()):
+                     semantic_title_for_folder = semantic_title_for_folder_base[len(temp_id_prefix_for_strip):].lstrip(" -").strip()
+                     if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE' # if stripping prefix leaves it empty
+                else:
+                    # Also check for "ID - Title" pattern if not "[ID] Title"
+                    alt_prefix_match = re.match(re.escape(id_used_for_successful_scrape) + r'\s*-\s*(.*)', semantic_title_for_folder_base, re.IGNORECASE)
+                    if alt_prefix_match:
+                        semantic_title_for_folder = alt_prefix_match.group(1).strip()
+                        if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
+                    else:
+                        semantic_title_for_folder = semantic_title_for_folder_base
+
+
+                final_id_for_ops = merged_data.get('id', 'NO_ID') # This is id_used_for_successful_scrape
+                final_studio_for_ops = merged_data.get('maker', '')
+                
+                # Now, ensure the merged_data['title'] (for display/NFO) is correctly prefixed with final_id_for_ops
+                # Use the 'semantic_title_for_folder' as the content part for this prefixing.
+                if final_id_for_ops != 'NO_ID':
+                    merged_data['title'] = f"[{final_id_for_ops}] {semantic_title_for_folder}" if semantic_title_for_folder and semantic_title_for_folder != 'NO_TITLE' else f"[{final_id_for_ops}]"
+                else: # No ID, use semantic title as is (or empty if it was NO_TITLE)
+                    merged_data['title'] = semantic_title_for_folder if semantic_title_for_folder != 'NO_TITLE' else ""
+                
+                merged_data['folder_name'] = format_and_truncate_folder_name(final_id_for_ops, final_studio_for_ops, semantic_title_for_folder) 
+                
+                # Ensure title_raw has a fallback. merge_scraped_data should set it, but as a safeguard:
                 if 'title_raw' not in merged_data or not merged_data.get('title_raw'):
-                    merged_data['title_raw'] = merged_data.get('originaltitle', semantic_title_for_folder)
+                    # Fallback to originaltitle or the semantic part used for folder name if title_raw is missing
+                    merged_data['title_raw'] = merged_data.get('originaltitle', semantic_title_for_folder if semantic_title_for_folder != 'NO_TITLE' else "")
+                
                 st.session_state.all_movie_data[filepath] = merged_data
                 processed_files += 1
-            elif not javlibrary_globally_failed_this_run: # No scraper succeeded, but also no global CF fail
-                 st.toast(f"No scraper data for '{sanitized_movie_id}'. Creating manual entry.", icon="✍️")
-                 # ... (Your manual data creation logic) ...
-                 # Example:
+            elif not javlibrary_globally_failed_this_run: # No scraper succeeded (after all attempts), but also no global CF fail
+                 # Use the sanitized_movie_id for manual entry consistency
+                 id_for_manual_entry = sanitized_movie_id 
+                 toast_msg = f"No data for '{filename_base}' (tried ID: '{sanitized_movie_id}'"
+                 if raw_movie_id_from_filename.lower() != sanitized_movie_id.lower():
+                     toast_msg += f" and raw ID: '{raw_movie_id_from_filename}'"
+                 toast_msg += "). Manual entry."
+                 st.toast(toast_msg, icon="✍️")
+                 
                  manual_data = {
-                     'id': sanitized_movie_id, # Use sanitized ID
-                     'content_id': sanitized_movie_id, # Use sanitized ID here too? Or keep raw? Let's use sanitized for consistency.
+                     'id': id_for_manual_entry, 
+                     'content_id': id_for_manual_entry, 
                      '_original_filename_base': original_filename_base_for_nfo,
-                     'title': f"[{sanitized_movie_id}]", # Start title with ID prefix
+                     'title': f"[{id_for_manual_entry}]", 
                      'title_raw': '', 'originaltitle': '', 'description': '',
                      'release_date': None, 'release_year': None, 'runtime': None,
                      'director': None, 'maker': None, 'label': None, 'series': None,
@@ -1060,7 +1136,7 @@ def process_input_dir_callback():
                      'original_filepath': filepath,
                      'download_all': default_download_state,
                      '_field_sources': {},
-                     'folder_name': format_and_truncate_folder_name(sanitized_movie_id, "", "") # Use sanitized ID
+                     'folder_name': format_and_truncate_folder_name(id_for_manual_entry, "", "")
                  }
                  st.session_state.all_movie_data[filepath] = manual_data
                  processed_files += 1
@@ -1794,28 +1870,8 @@ def rescrape_dialog():
 
 # --- End Save Settings Callback ---
 
-# --- Sidebar ---
-st.sidebar.header("Navigation")
-page_options = ["Crawler", "Settings"]
-current_page_index = 0
-if 'current_page' in st.session_state:
-    try: current_page_index = page_options.index(st.session_state.current_page)
-    except ValueError: current_page_index = 0
-st.sidebar.selectbox( "Select Page", options=page_options, key="current_page", index=current_page_index, label_visibility="collapsed")
-st.sidebar.divider()
-
-if st.session_state.current_page == "Crawler":
-    st.sidebar.header("Crawler")
-    crawler_view_options = ["Editor", "Raw Data"]
-    current_crawler_view_index = 0
-    if 'crawler_view' in st.session_state:
-         try: current_crawler_view_index = crawler_view_options.index(st.session_state.crawler_view)
-         except ValueError: current_crawler_view_index = 0
-    st.sidebar.radio( "View Mode", options=crawler_view_options, key="crawler_view", index=current_crawler_view_index, label_visibility="collapsed")
-# --- End Sidebar ---
-
 # --- Main Page Content ---
-if st.session_state.current_page == "Crawler":
+def show_crawler_page():
     st.markdown("<h1 style='padding-top: 0px; margin-top: 0px;'>🎬 JavOrganizer</h1>", unsafe_allow_html=True)
 
 # --- Javlibrary Credentials Prompt UI ---
@@ -1906,19 +1962,27 @@ if st.session_state.current_page == "Crawler":
                         current_index = 0
                         if st.session_state.current_movie_key: st.session_state._apply_changes_triggered = False
 
-                # Adjust column ratios: Prev, Next, Dropdown, Re-Scrape Button
-                nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 1, 3, 1.5]) # Example ratios
+                nav_col_prev, nav_col_next, nav_col_counter, nav_col_dropdown, nav_col_rescrape = st.columns([1, 1, 0.8, 3, 1.5]) 
 
-                with nav_col1: 
+                with nav_col_prev: 
                     st.button("Previous", on_click=go_previous_movie, disabled=(current_index == 0 or not st.session_state.current_movie_key), use_container_width=True)
-                with nav_col2: 
+                with nav_col_next: 
                     st.button("Next", on_click=go_next_movie, disabled=(current_index >= len(valid_keys) - 1 or not st.session_state.current_movie_key), use_container_width=True)
+                
+                with nav_col_counter:
+                    if valid_keys:
+                        st.markdown(
+                            f"<div style='text-align: center; margin-top: 8px; font-size: 0.9em;'>{current_index + 1} / {len(valid_keys)}</div>", 
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.empty()
 
                 def update_current_movie_selection():
                     st.session_state.current_movie_key = st.session_state.movie_selector
                     st.session_state._apply_changes_triggered = False 
 
-                with nav_col3: # Column for the movie selector dropdown
+                with nav_col_dropdown: # Column for the movie selector dropdown
                     st.selectbox("Select Movie:",
                                  options=valid_keys,
                                  format_func=lambda fp: movie_options.get(fp, "Unknown File"),
@@ -1928,7 +1992,7 @@ if st.session_state.current_page == "Crawler":
                                  label_visibility="collapsed",
                                  disabled=(not valid_keys))
                 
-                with nav_col4: # New column for the Re-Scrape button
+                with nav_col_rescrape: # New column for the Re-Scrape button
                     if st.button("Manual Re-Crawl", key="open_rescrape_dialog_nav_button", use_container_width=True): # Keep help short
                         if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
                             st.session_state.show_rescrape_dialog_actual = True
@@ -1952,7 +2016,7 @@ if st.session_state.current_page == "Crawler":
         elif st.session_state.movie_file_paths:
             st.warning("Processed input directory, but no data could be scraped.")
         else:
-            st.info("👋 Welcome! Enter an Input Directory above and click 'Run Crawlers'.")
+            st.info("Enter an Input Directory above and click 'Run Crawlers'.")
 
         # --- Dialog Invocation Logic (should be checked on every run if flag could be set from nav) ---
         if 'show_rescrape_dialog_actual' not in st.session_state: # Ensure flag exists
@@ -2110,7 +2174,7 @@ if st.session_state.current_page == "Crawler":
     # --- End View Rendering ---
 
 # --- Settings Page ---
-elif st.session_state.current_page == "Settings":
+def show_settings_page():
     sync_settings_from_file_to_state()
     st.markdown("<h1 style='padding-top: 0px; margin-top: 0px;'>⚙️ Settings</h1>", unsafe_allow_html=True)
 
@@ -2211,3 +2275,32 @@ elif st.session_state.current_page == "Settings":
         save_button = st.form_submit_button("💾 Save All Settings", use_container_width=True, on_click=save_settings_callback)
 
 # --- End Settings Page ---
+
+# --- Sidebar ---
+pg = st.navigation(
+    [
+        st.Page(show_crawler_page, title="🎬 Crawler", default=True), # Set one as default
+        st.Page(show_settings_page, title="⚙️ Settings"),
+    ]
+)
+
+if 'active_page_func_name' not in st.session_state:
+    # Set a default based on which st.Page is 'default=True'
+    st.session_state.active_page_func_name = show_crawler_page.__name__
+
+if st.session_state.get("active_page_func_name") == show_crawler_page.__name__:
+    crawler_view_options = ["Editor", "Raw Data"]
+    current_crawler_view_index = 0
+    if 'crawler_view' in st.session_state:
+         try: current_crawler_view_index = crawler_view_options.index(st.session_state.crawler_view)
+         except ValueError: current_crawler_view_index = 0 # Default to Editor
+    st.sidebar.radio( 
+        "View Mode", 
+        options=crawler_view_options, 
+        key="crawler_view", # This key is used by show_crawler_page
+        index=current_crawler_view_index,
+        # label_visibility="collapsed" # If you prefer no explicit "View Mode" label
+    )
+
+pg.run()
+# --- End Sidebar ---
