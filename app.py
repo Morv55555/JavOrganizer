@@ -224,49 +224,44 @@ st.set_page_config(page_title="JavOrganizer", layout="wide", initial_sidebar_sta
 
 # --- Session State Initialization & Settings Loading ---
 if 'initialized' not in st.session_state:
-    loaded_settings = load_settings() 
+    loaded_settings = load_settings()
     st.session_state.all_movie_data = {}
     st.session_state.current_movie_key = None
     st.session_state.movie_file_paths = []
-    st.session_state.current_page = "Crawler"  
-    st.session_state.crawler_view = "Editor"   
+    st.session_state.current_page = "Crawler"
+    st.session_state.crawler_view = "Editor"
 
     # Load settings from file/defaults
-    st.session_state.default_download_all_initial_state = loaded_settings.get("default_download_all_initial_state", False) 
-    st.session_state.enabled_scrapers = loaded_settings.get("enabled_scrapers", []) 
-    st.session_state.field_priorities = loaded_settings.get("field_priorities", {}) 
-    st.session_state.input_dir = loaded_settings.get("input_dir", "") 
-    st.session_state.output_dir = loaded_settings.get("output_dir", "") 
-    
+    st.session_state.default_download_all_initial_state = loaded_settings.get("default_download_all_initial_state", False)
+    st.session_state.enabled_scrapers = loaded_settings.get("enabled_scrapers", [])
+    st.session_state.field_priorities = loaded_settings.get("field_priorities", {})
+    st.session_state.input_dir = loaded_settings.get("input_dir", "")
+    st.session_state.output_dir = loaded_settings.get("output_dir", "")
+
     # Translation settings (if you have them)
     st.session_state.translator_service = loaded_settings.get("translator_service", "None")
-    st.session_state.target_language = loaded_settings.get("target_language", "") 
-    st.session_state.api_key = loaded_settings.get("api_key", "") 
-    st.session_state.translate_title = loaded_settings.get("translate_title", False) 
-    st.session_state.translate_description = loaded_settings.get("translate_description", False) 
-    st.session_state.keep_original_description = loaded_settings.get("keep_original_description", False) 
+    st.session_state.target_language = loaded_settings.get("target_language", "")
+    st.session_state.api_key = loaded_settings.get("api_key", "")
+    st.session_state.translate_title = loaded_settings.get("translate_title", False)
+    st.session_state.translate_description = loaded_settings.get("translate_description", False)
+    st.session_state.keep_original_description = loaded_settings.get("keep_original_description", False)
 
     # Javlibrary specific session state for credentials prompt
     st.session_state.javlibrary_user_agent = None
     st.session_state.javlibrary_cf_token = None
-    st.session_state.show_javlibrary_prompt = False 
-    st.session_state.javlibrary_creds_provided_this_session = False 
+    st.session_state.show_javlibrary_prompt = False
+    st.session_state.javlibrary_creds_provided_this_session = False
 
     # Other states you might have
     st.session_state.genre_blacklist = loaded_settings.get("genre_blacklist", [])
-    st.session_state.last_crawl_was_recursive = False 
+    st.session_state.last_crawl_was_recursive = False
 
-    # Initialize session state for re-scrape UI
-    st.session_state.rescrape_scraper_select = AVAILABLE_SCRAPER_NAMES[0] if AVAILABLE_SCRAPER_NAMES else None
-    st.session_state.rescrape_url_input = ""
-    st.session_state.show_rescrape_section = False
 
-    # Initialize selected_scraper if applicable
-    if not st.session_state.enabled_scrapers: 
+    if not st.session_state.enabled_scrapers:
         st.session_state.selected_scraper = None
-    elif "selected_scraper" not in st.session_state or st.session_state.selected_scraper not in st.session_state.enabled_scrapers: 
+    elif "selected_scraper" not in st.session_state or st.session_state.selected_scraper not in st.session_state.enabled_scrapers:
         st.session_state.selected_scraper = st.session_state.enabled_scrapers[0] if st.session_state.enabled_scrapers else None
-    
+
     st.session_state.initialized = True
 # --- End Session State ---
 
@@ -1503,206 +1498,198 @@ def apply_changes_callback():
 # --- NEW: Callback for Re-Scraping with URL ---
 def rescrape_with_url_callback():
     current_movie_key = st.session_state.current_movie_key
-    selected_scraper_for_rescrape = st.session_state.get("rescrape_scraper_select")
-    rescrape_url = st.session_state.get("rescrape_url_input", "").strip()
+    selected_scrapers_for_rescrape = st.session_state.get("rescrape_selected_scrapers", [])
 
     if not current_movie_key or current_movie_key not in st.session_state.all_movie_data:
         st.error("No movie selected or data not found for re-scraping.")
         return
 
-    if not selected_scraper_for_rescrape:
-        st.error("Please select a scraper for re-scraping.")
+    if not selected_scrapers_for_rescrape:
+        st.error("Please select at least one scraper for re-scraping.")
         return
 
-    if not rescrape_url:
-        st.error("Please enter a URL for re-scraping.")
-        return
+    scraper_url_map = {}
+    for scraper_name in selected_scrapers_for_rescrape:
+        if scraper_name not in SCRAPER_REGISTRY:
+            st.error(f"Selected scraper '{scraper_name}' is not available.")
+            return
+        url_key = f"rescrape_url_{scraper_name}"
+        rescrape_url = st.session_state.get(url_key, "").strip()
+        if not rescrape_url:
+            st.error(f"Please enter a URL for the selected scraper: {scraper_name}.")
+            return
+        scraper_url_map[scraper_name] = rescrape_url
 
-    if selected_scraper_for_rescrape not in SCRAPER_REGISTRY:
-        st.error(f"Selected scraper '{selected_scraper_for_rescrape}' is not available.")
-        return
-
-    # Javlibrary credentials check for re-scrape
-    if selected_scraper_for_rescrape == "Javlibrary" and JAVLIBRARY_AVAILABLE:
+    if "Javlibrary" in selected_scrapers_for_rescrape and JAVLIBRARY_AVAILABLE:
         if not st.session_state.get("javlibrary_creds_provided_this_session", False):
-            st.session_state.show_javlibrary_prompt = True 
+            st.session_state.show_javlibrary_prompt = True
             st.warning("Javlibrary selected for re-scrape. Please provide credentials via the prompt at the top of the page, then try re-scraping again.", icon="🔑")
             st.rerun()
             return
 
-    status_placeholder = st.empty() 
-    status_placeholder.info(f"Re-scraping '{os.path.basename(current_movie_key)}' using {selected_scraper_for_rescrape} from URL...")
+    status_placeholder = st.empty()
+    status_placeholder.info(f"Re-scraping '{os.path.basename(current_movie_key)}' using {', '.join(selected_scrapers_for_rescrape)}...")
 
-    scrape_func = SCRAPER_REGISTRY[selected_scraper_for_rescrape]['scrape']
-    newly_scraped_data = None
-    try:
-        if selected_scraper_for_rescrape == "Javlibrary":
-            current_jl_user_agent = st.session_state.get("javlibrary_user_agent")
-            current_jl_cf_token = st.session_state.get("javlibrary_cf_token")
-            raw_data = scrape_func(rescrape_url, user_agent=current_jl_user_agent, cf_clearance_token=current_jl_cf_token)
-        else:
-            raw_data = scrape_func(rescrape_url)
+    scraped_data_from_all_rescrape_sources = {}
+    any_rescrape_success = False
+    javlibrary_failed_this_rescrape_attempt = False
 
-        if raw_data == "CF_CHALLENGE":
-            st.error(f"Javlibrary credentials failed for re-scrape (Cloudflare Challenge). Please provide valid credentials and try again.", icon="🚨")
-            st.session_state.javlibrary_creds_provided_this_session = False
-            st.session_state.javlibrary_user_agent = None
-            st.session_state.javlibrary_cf_token = None
-            status_placeholder.empty()
-            st.rerun()
-            return
-        elif raw_data:
-            newly_scraped_data = raw_data
-            newly_scraped_data.pop('folder_url', None)
-            newly_scraped_data.pop('folder_image_constructed_url', None)
-        else:
-            st.warning(f"Scraper '{selected_scraper_for_rescrape}' did not return any data from the URL: {rescrape_url}")
-            status_placeholder.empty()
-            return
+    current_jl_user_agent = st.session_state.get("javlibrary_user_agent")
+    current_jl_cf_token = st.session_state.get("javlibrary_cf_token")
 
-    except Exception as e:
-        st.error(f"Error during re-scrape with '{selected_scraper_for_rescrape}': {e}")
-        logging.exception(f"Error re-scraping {current_movie_key} with {selected_scraper_for_rescrape}")
+    for scraper_name, url_to_scrape in scraper_url_map.items():
+        status_placeholder.info(f"Re-crawling with {scraper_name}")
+        scrape_func = SCRAPER_REGISTRY[scraper_name]['scrape']
+        try:
+            raw_data = None
+            if scraper_name == "Javlibrary":
+                raw_data = scrape_func(url_to_scrape, user_agent=current_jl_user_agent, cf_clearance_token=current_jl_cf_token)
+            else:
+                raw_data = scrape_func(url_to_scrape)
+
+            if raw_data == "CF_CHALLENGE":
+                st.error(f"Javlibrary credentials failed for re-scrape with {scraper_name} (Cloudflare Challenge). Please provide valid credentials and try again.", icon="🚨")
+                st.session_state.javlibrary_creds_provided_this_session = False
+                st.session_state.javlibrary_user_agent = None
+                st.session_state.javlibrary_cf_token = None
+                javlibrary_failed_this_rescrape_attempt = True
+                break
+            elif raw_data:
+                raw_data.pop('folder_url', None)
+                raw_data.pop('folder_image_constructed_url', None)
+                scraped_data_from_all_rescrape_sources[scraper_name] = raw_data
+                any_rescrape_success = True
+                print(f"Successfully re-scraped data with {scraper_name} for {current_movie_key}")
+            else:
+                st.warning(f"Scraper '{scraper_name}' did not return any data from the URL: {url_to_scrape}")
+        except Exception as e:
+            st.error(f"Error during re-scrape with '{scraper_name}': {e}")
+            logging.exception(f"Error re-scraping {current_movie_key} with {scraper_name} from {url_to_scrape}")
+
+    if javlibrary_failed_this_rescrape_attempt:
         status_placeholder.empty()
+        st.rerun()
         return
 
-    if newly_scraped_data:
-        status_placeholder.info("Re-scrape successful. Processing data...")
-        
-        original_movie_entry = st.session_state.all_movie_data[current_movie_key]
-        processed_data_for_movie = {}
-
-        # 1. Preserve essential fields
-        processed_data_for_movie['_original_filename_base'] = original_movie_entry.get('_original_filename_base')
-        processed_data_for_movie['original_filepath'] = original_movie_entry.get('original_filepath')
-        # Use default from app_settings if not found in original entry
-        default_dl_all_initial = app_settings.DEFAULT_DOWNLOAD_ALL_INITIAL_STATE if SETTINGS_LOADED else False
-        processed_data_for_movie['download_all'] = original_movie_entry.get('download_all', default_dl_all_initial)
-
-
-        # 2. Initialize with base structure then populate with newly scraped data
-        base_keys_to_init = (set(app_settings.PRIORITY_FIELDS_ORDERED) | 
-                             {'content_id', 'originaltitle', 'release_year', 'runtime', 
-                              'director', 'maker', 'label', 'series', 'cover_url', 
-                              'rating', 'votes', 'set'})
-        
-        for key in base_keys_to_init:
-            if key in ['genres', 'actresses', 'screenshot_urls']:
-                processed_data_for_movie[key] = []
-            else:
-                processed_data_for_movie[key] = None
-        
-        processed_data_for_movie.update(newly_scraped_data)
-
-        # 3. Set source and URL
-        processed_data_for_movie['source'] = newly_scraped_data.get('source',selected_scraper_for_rescrape.lower())
-        processed_data_for_movie['url'] = rescrape_url 
-        
-        # 4. Set _field_sources
-        field_sources_for_rescrape = {}
-        for key in newly_scraped_data.keys():
-            if key not in ['folder_url', 'folder_image_constructed_url']:
-                 field_sources_for_rescrape[key] = selected_scraper_for_rescrape
-        processed_data_for_movie['_field_sources'] = field_sources_for_rescrape
-
-        # 5. ID handling
-        if 'id' not in newly_scraped_data or not newly_scraped_data.get('id'):
-            processed_data_for_movie['id'] = original_movie_entry.get('id', sanitize_id_for_scraper(original_movie_entry.get('_original_filename_base','')))
-        if 'content_id' not in processed_data_for_movie or not processed_data_for_movie.get('content_id'):
-            processed_data_for_movie['content_id'] = processed_data_for_movie.get('id')
-
-
-        # --- Re-apply Translations ---
-        current_settings = load_settings()
-        translator_service = current_settings.get("translator_service", "None")
-        target_language = current_settings.get("target_language", "")
-        api_key_trans = current_settings.get("api_key", "")
-        translate_title_flag = current_settings.get("translate_title", False)
-        translate_desc_flag = current_settings.get("translate_description", False)
-        keep_orig_desc_flag = current_settings.get("keep_original_description", False)
-        translation_enabled = translator_service != "None"
-        translation_possible_for_rescrape = True
-        if translation_enabled:
-            if not target_language: translation_possible_for_rescrape = False
-            if translator_service in ["DeepL", "DeepSeek"] and not api_key_trans: translation_possible_for_rescrape = False
-
-        if translation_enabled and translation_possible_for_rescrape:
-            status_placeholder.info("Translating re-scraped data...")
-            # Use title from newly_scraped_data (pre-translation) for translation source
-            title_to_translate = newly_scraped_data.get('title', '') 
-            desc_to_translate = newly_scraped_data.get('description', '')
-
-            if translate_title_flag and title_to_translate:
-                translated_title = _run_translation_script(translator_service, title_to_translate, target_language, api_key_trans)
-                if translated_title:
-                    processed_data_for_movie['title'] = translated_title
-            
-            if translate_desc_flag and desc_to_translate:
-                translated_desc = _run_translation_script(translator_service, desc_to_translate, target_language, api_key_trans)
-                if translated_desc:
-                    if keep_orig_desc_flag and desc_to_translate: # Keep original from scraper
-                        processed_data_for_movie['description'] = f"{translated_desc}\n\n{desc_to_translate}"
-                    else:
-                        processed_data_for_movie['description'] = translated_desc
-        
-        # --- Re-apply Genre Blacklist ---
-        status_placeholder.info("Applying genre blacklist...")
-        current_genre_blacklist_lc = current_settings.get("genre_blacklist", [])
-        if current_genre_blacklist_lc and \
-           'genres' in processed_data_for_movie and \
-           isinstance(processed_data_for_movie['genres'], list) and \
-           processed_data_for_movie['genres']:
-            
-            original_genres_for_movie = processed_data_for_movie['genres']
-            filtered_movie_genres = [
-                genre_item 
-                for genre_item in original_genres_for_movie 
-                if isinstance(genre_item, str) and \
-                   genre_item.strip() and \
-                   genre_item.strip().lower() not in current_genre_blacklist_lc
-            ]
-            processed_data_for_movie['genres'] = filtered_movie_genres
-
-        # --- Final Data Preparation ---
-        status_placeholder.info("Finalizing data...")
-        final_id_for_formatting = processed_data_for_movie.get('id', 'NO_ID')
-        final_studio_for_formatting = processed_data_for_movie.get('maker', '')
-        
-        # title_raw should be the original, non-translated title from the scraper.
-        processed_data_for_movie['title_raw'] = newly_scraped_data.get('title_raw', newly_scraped_data.get('title', ''))
-        if not processed_data_for_movie['title_raw']:
-            processed_data_for_movie['title_raw'] = processed_data_for_movie.get('originaltitle', '')
-
-        # semantic_title_for_folder: use translated title if available, else title_raw
-        semantic_title_for_folder = processed_data_for_movie.get('title', processed_data_for_movie.get('title_raw', 'NO_TITLE'))
-        if final_id_for_formatting != 'NO_ID' and semantic_title_for_folder.lower().startswith(f"[{final_id_for_formatting.lower()}]"):
-             # If semantic title (potentially translated one) is ALREADY prefixed from scraper, remove prefix for folder name logic
-             semantic_title_for_folder = semantic_title_for_folder[len(final_id_for_formatting)+2:].strip()
-
-
-        # Current 'title' in processed_data_for_movie is the display title (potentially translated)
-        current_display_title_for_prefix = processed_data_for_movie.get('title', '')
-        prefix_to_check = f"[{final_id_for_formatting}]"
-        if final_id_for_formatting != 'NO_ID' and current_display_title_for_prefix and not current_display_title_for_prefix.lower().startswith(prefix_to_check.lower()):
-            processed_data_for_movie['title'] = f"[{final_id_for_formatting}] {current_display_title_for_prefix}"
-        elif not current_display_title_for_prefix and final_id_for_formatting != 'NO_ID':
-            processed_data_for_movie['title'] = f"[{final_id_for_formatting}]"
-        
-        processed_data_for_movie['folder_name'] = format_and_truncate_folder_name(
-            final_id_for_formatting, 
-            final_studio_for_formatting, 
-            semantic_title_for_folder
-        )
-        
-        if 'originaltitle' not in processed_data_for_movie or not processed_data_for_movie.get('originaltitle'):
-            processed_data_for_movie['originaltitle'] = processed_data_for_movie.get('title_raw', '')
-
-        st.session_state.all_movie_data[current_movie_key] = processed_data_for_movie
-        
+    if not any_rescrape_success:
         status_placeholder.empty()
-        st.toast(f"Successfully re-scraped and updated '{os.path.basename(current_movie_key)}'!", icon="✅")
-        
-        st.session_state._apply_changes_triggered = False
+        st.warning("No data was successfully re-scraped from any of the provided URLs/scrapers.")
+        return
+
+    status_placeholder.info("Re-scrape successful. Merging data...")
+    current_settings_for_merge = load_settings()
+    field_priorities_for_merge = current_settings_for_merge.get("field_priorities", {})
+    merged_data, field_sources = merge_scraped_data(scraped_data_from_all_rescrape_sources, field_priorities_for_merge)
+
+    if not merged_data:
+        status_placeholder.empty()
+        st.error("Failed to merge data from re-scrape. No data to update.")
+        return
+
+    original_movie_entry = st.session_state.all_movie_data[current_movie_key]
+    processed_data_for_movie = {}
+
+    processed_data_for_movie['_original_filename_base'] = original_movie_entry.get('_original_filename_base')
+    processed_data_for_movie['original_filepath'] = original_movie_entry.get('original_filepath')
+    default_dl_all_initial = app_settings.DEFAULT_DOWNLOAD_ALL_INITIAL_STATE if SETTINGS_LOADED else False
+    processed_data_for_movie['download_all'] = original_movie_entry.get('download_all', default_dl_all_initial)
+    processed_data_for_movie.update(merged_data)
+    processed_data_for_movie['_field_sources'] = field_sources
+
+    if 'id' not in processed_data_for_movie or not processed_data_for_movie.get('id'):
+        processed_data_for_movie['id'] = original_movie_entry.get('id', sanitize_id_for_scraper(original_movie_entry.get('_original_filename_base','')))
+    if 'content_id' not in processed_data_for_movie or not processed_data_for_movie.get('content_id'):
+        processed_data_for_movie['content_id'] = processed_data_for_movie.get('id')
+
+    translator_service = current_settings_for_merge.get("translator_service", "None")
+    target_language = current_settings_for_merge.get("target_language", "")
+    api_key_trans = current_settings_for_merge.get("api_key", "")
+    translate_title_flag = current_settings_for_merge.get("translate_title", False)
+    translate_desc_flag = current_settings_for_merge.get("translate_description", False)
+    keep_orig_desc_flag = current_settings_for_merge.get("keep_original_description", False)
+    translation_enabled = translator_service != "None"
+    translation_possible_for_rescrape = True
+    if translation_enabled:
+        if not target_language: translation_possible_for_rescrape = False
+        if translator_service in ["DeepL", "DeepSeek"] and not api_key_trans: translation_possible_for_rescrape = False
+
+    if translation_enabled and translation_possible_for_rescrape:
+        status_placeholder.info("Translating re-scraped data...")
+        title_to_translate = processed_data_for_movie.get('title', '')
+        desc_to_translate = processed_data_for_movie.get('description', '')
+
+        if translate_title_flag and title_to_translate:
+            translated_title = _run_translation_script(translator_service, title_to_translate, target_language, api_key_trans)
+            if translated_title:
+                processed_data_for_movie['title'] = translated_title
+
+        if translate_desc_flag and desc_to_translate:
+            translated_desc = _run_translation_script(translator_service, desc_to_translate, target_language, api_key_trans)
+            if translated_desc:
+                if keep_orig_desc_flag and desc_to_translate:
+                    processed_data_for_movie['description'] = f"{translated_desc}\n\n{desc_to_translate}"
+                else:
+                    processed_data_for_movie['description'] = translated_desc
+
+    status_placeholder.info("Applying genre blacklist...")
+    current_genre_blacklist_lc = current_settings_for_merge.get("genre_blacklist", [])
+    if current_genre_blacklist_lc and \
+       'genres' in processed_data_for_movie and \
+       isinstance(processed_data_for_movie['genres'], list) and \
+       processed_data_for_movie['genres']:
+        original_genres_for_movie = processed_data_for_movie['genres']
+        filtered_movie_genres = [
+            genre_item
+            for genre_item in original_genres_for_movie
+            if isinstance(genre_item, str) and \
+               genre_item.strip() and \
+               genre_item.strip().lower() not in current_genre_blacklist_lc
+        ]
+        processed_data_for_movie['genres'] = filtered_movie_genres
+
+    status_placeholder.info("Finalizing data...")
+    final_id_for_formatting = processed_data_for_movie.get('id', 'NO_ID')
+    final_studio_for_formatting = processed_data_for_movie.get('maker', '')
+
+    if 'title_raw' not in processed_data_for_movie or not processed_data_for_movie.get('title_raw'):
+        processed_data_for_movie['title_raw'] = merged_data.get('title', merged_data.get('originaltitle', ''))
+
+    semantic_title_for_folder_base = processed_data_for_movie.get('title', processed_data_for_movie.get('title_raw', 'NO_TITLE'))
+    semantic_title_for_folder = semantic_title_for_folder_base
+    if final_id_for_formatting != 'NO_ID':
+        temp_id_prefix_for_strip = f"[{final_id_for_formatting}]"
+        if semantic_title_for_folder_base.lower().startswith(temp_id_prefix_for_strip.lower()):
+             semantic_title_for_folder = semantic_title_for_folder_base[len(temp_id_prefix_for_strip):].lstrip(" -").strip()
+             if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
+        else:
+            alt_prefix_match = re.match(re.escape(final_id_for_formatting) + r'\s*-\s*(.*)', semantic_title_for_folder_base, re.IGNORECASE)
+            if alt_prefix_match:
+                semantic_title_for_folder = alt_prefix_match.group(1).strip()
+                if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
+
+    current_semantic_title_for_display = processed_data_for_movie.get('title', '')
+    if final_id_for_formatting != 'NO_ID':
+        prefix_to_check = f"[{final_id_for_formatting}]"
+        if current_semantic_title_for_display and not current_semantic_title_for_display.lower().startswith(prefix_to_check.lower()):
+            processed_data_for_movie['title'] = f"[{final_id_for_formatting}] {current_semantic_title_for_display}"
+        elif not current_semantic_title_for_display:
+            processed_data_for_movie['title'] = f"[{final_id_for_formatting}]"
+
+    processed_data_for_movie['folder_name'] = format_and_truncate_folder_name(
+        final_id_for_formatting,
+        final_studio_for_formatting,
+        semantic_title_for_folder
+    )
+
+    if 'originaltitle' not in processed_data_for_movie or not processed_data_for_movie.get('originaltitle'):
+        processed_data_for_movie['originaltitle'] = processed_data_for_movie.get('title_raw', '')
+
+    st.session_state.all_movie_data[current_movie_key] = processed_data_for_movie
+
+    status_placeholder.empty()
+    st.toast(f"Successfully re-scraped and updated '{os.path.basename(current_movie_key)}' using {', '.join(selected_scrapers_for_rescrape)}!", icon="✅")
+
+    st.session_state._apply_changes_triggered = False
 
 # --- Other Callbacks (update_download_all_flag, go_previous/next_movie) remain unchanged ---
 def update_download_all_flag():
@@ -1847,47 +1834,51 @@ def javlibrary_credentials_dialog():
 # --- Re-Scrape Dialog Function ---
 @st.dialog(title="Re-Scrape with Specific URL", width="large")
 def rescrape_dialog():
-    st.caption("If the initial scrape was incorrect, select a scraper, provide the correct URL to the movie's page, and fetch new data. This will replace the current movie's metadata.")
-    
-    scraper_options_rescrape = [""] + AVAILABLE_SCRAPER_NAMES 
-    
-    if "rescrape_scraper_select" not in st.session_state:
-        st.session_state.rescrape_scraper_select = scraper_options_rescrape[0] 
-    if "rescrape_url_input" not in st.session_state:
-        st.session_state.rescrape_url_input = ""
+    st.caption("If the initial scrape was incorrect, select scraper(s), provide the correct URL(s) to the movie's page(s), and fetch new data. This will replace the current movie's metadata.")
 
-    current_rescrape_scraper_idx = 0
-    current_selection = st.session_state.get("rescrape_scraper_select")
-    if current_selection in scraper_options_rescrape:
-        current_rescrape_scraper_idx = scraper_options_rescrape.index(current_selection)
-    else:
-        st.session_state.rescrape_scraper_select = scraper_options_rescrape[0]
-        current_rescrape_scraper_idx = 0
+    # Ensure the session state key for selected scrapers is initialized if it doesn't exist
+    if "rescrape_selected_scrapers" not in st.session_state:
+        st.session_state.rescrape_selected_scrapers = []
+    # For URL inputs, ensure they are initialized dynamically within the loop if not present
 
-    st.selectbox(
-        "Select Scraper:", 
-        options=scraper_options_rescrape, 
-        index=current_rescrape_scraper_idx,
-        key="rescrape_scraper_select",      
-        help="Choose the scraper corresponding to the URL you provide."
+    st.multiselect(
+        "Select Scraper(s):",
+        options=AVAILABLE_SCRAPER_NAMES,
+        key="rescrape_selected_scrapers", # Streamlit uses the value from session_state if key exists
+        help="Choose the scraper(s) corresponding to the URL(s) you will provide."
     )
-    st.text_input(
-        "Movie URL:", 
-        key="rescrape_url_input", 
-        placeholder="e.g., https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=abc00123/",
-        help="Paste the direct URL to the movie's page on the selected scraper's site."
-    )
-    
+
+    selected_scrapers_for_urls = st.session_state.get("rescrape_selected_scrapers", [])
+    all_urls_provided = True
+    if not selected_scrapers_for_urls:
+        all_urls_provided = False
+
+    for scraper_name in selected_scrapers_for_urls:
+        url_input_key = f"rescrape_url_{scraper_name}"
+        if url_input_key not in st.session_state: # Initialize if new scraper selected
+             st.session_state[url_input_key] = ""
+
+        st.text_input(
+            f"URL for {scraper_name}:",
+            key=url_input_key,
+            placeholder=f"e.g., https://www.{scraper_name.lower()}.com/...",
+            help=f"Paste the direct URL to the movie's page on {scraper_name}'s site."
+        )
+        if not st.session_state.get(url_input_key, "").strip():
+            all_urls_provided = False
+
     col_action, col_cancel = st.columns(2)
     with col_action:
         if st.button(
-            "Manual Re-Crawl", 
-            disabled=(not st.session_state.get("rescrape_scraper_select") or not AVAILABLE_SCRAPER_NAMES),
+            "Manual Re-Crawl",
+            disabled=(not selected_scrapers_for_urls or not all_urls_provided or not AVAILABLE_SCRAPER_NAMES),
             use_container_width=True
         ):
-            st.session_state.show_rescrape_dialog_actual = False # Mark dialog as done
-            rescrape_with_url_callback() 
-            if not st.session_state.get("show_javlibrary_prompt"): # Avoid double rerun if javlibrary prompt is shown by callback
+            st.session_state.show_rescrape_dialog_actual = False # Mark dialog for closure *before* callback
+            rescrape_with_url_callback()
+            # If the callback (e.g. JavLib prompt) didn't already trigger a rerun,
+            # we need one here to close the dialog and refresh the main page.
+            if not st.session_state.get("show_javlibrary_prompt", False):
                  st.rerun()
 # --- End Re-Scrape Dialog Function ---
 
@@ -1897,13 +1888,12 @@ def rescrape_dialog():
 def show_crawler_page():
     st.markdown("<h1 style='padding-top: 0px; margin-top: 0px;'>🎬 JavOrganizer</h1>", unsafe_allow_html=True)
 
-# --- Javlibrary Credentials Prompt UI ---
+# --- Javlibrary Credentials Prompt UI (Updated condition) ---
     if st.session_state.get("show_javlibrary_prompt") and \
-       ("Javlibrary" in st.session_state.get("enabled_scrapers", []) or \
-        st.session_state.get("rescrape_scraper_select") == "Javlibrary") and \
+       (("Javlibrary" in st.session_state.get("enabled_scrapers", [])) or \
+        ("Javlibrary" in st.session_state.get("rescrape_selected_scrapers", []))) and \
        JAVLIBRARY_AVAILABLE:
-        
-        javlibrary_credentials_dialog() # Call the decorated function
+        javlibrary_credentials_dialog()
 
     # --- Inputs: Directories ---
     col_in, col_out = st.columns(2)
