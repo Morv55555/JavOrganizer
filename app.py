@@ -38,6 +38,11 @@ except ImportError:
         DEFAULT_TRANSLATE_DESCRIPTION = False
         DEFAULT_KEEP_ORIGINAL_DESCRIPTION = False
         DEFAULT_GENRE_BLACKLIST = []
+        DEFAULT_NAMING_POSTER_FILENAME_PATTERN = "poster"
+        DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN = "folder"
+        DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN = "fanart{n}"
+        DEFAULT_NAMING_NFO_TITLE_PATTERN = "[{id}] {title}"
+        DEFAULT_NAMING_FOLDER_NAME_PATTERN = "{id} [{studio}] - {title}"
     app_settings = DummySettings()
 
 # --- Define Settings File Path ---
@@ -104,6 +109,11 @@ def load_settings():
         "translate_description": app_settings.DEFAULT_TRANSLATE_DESCRIPTION,
         "keep_original_description": app_settings.DEFAULT_KEEP_ORIGINAL_DESCRIPTION,
         "genre_blacklist": app_settings.DEFAULT_GENRE_BLACKLIST,
+        "naming_poster_filename_pattern": app_settings.DEFAULT_NAMING_POSTER_FILENAME_PATTERN,
+        "naming_folder_image_filename_pattern": app_settings.DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN,
+        "naming_screenshot_filename_pattern": app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN,
+        "naming_nfo_title_pattern": app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN,
+        "naming_folder_name_pattern": app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN,
     }
     # Filter defaults based on availability right away
     defaults["enabled_scrapers"] = [s for s in defaults["enabled_scrapers"] if s in AVAILABLE_SCRAPER_NAMES]
@@ -157,6 +167,13 @@ def load_settings():
             else: # If not a list, use default
                 loaded_settings["genre_blacklist"] = defaults["genre_blacklist"]
 
+            # Load Naming Convention Settings
+            loaded_settings["naming_poster_filename_pattern"] = user_settings.get("naming_poster_filename_pattern", defaults["naming_poster_filename_pattern"])
+            loaded_settings["naming_folder_image_filename_pattern"] = user_settings.get("naming_folder_image_filename_pattern", defaults["naming_folder_image_filename_pattern"])
+            loaded_settings["naming_screenshot_filename_pattern"] = user_settings.get("naming_screenshot_filename_pattern", defaults["naming_screenshot_filename_pattern"])
+            loaded_settings["naming_nfo_title_pattern"] = user_settings.get("naming_nfo_title_pattern", defaults["naming_nfo_title_pattern"])
+            loaded_settings["naming_folder_name_pattern"] = user_settings.get("naming_folder_name_pattern", defaults["naming_folder_name_pattern"])
+
 
             print(f"Loaded and validated settings from {USER_SETTINGS_FILE}")
             return loaded_settings
@@ -182,6 +199,11 @@ def save_settings_to_file():
         "translate_description": st.session_state.translate_description,
         "keep_original_description": st.session_state.keep_original_description,
         "genre_blacklist": st.session_state.get("genre_blacklist", []),
+        "naming_poster_filename_pattern": st.session_state.naming_poster_filename_pattern,
+        "naming_folder_image_filename_pattern": st.session_state.naming_folder_image_filename_pattern,
+        "naming_screenshot_filename_pattern": st.session_state.naming_screenshot_filename_pattern,
+        "naming_nfo_title_pattern": st.session_state.naming_nfo_title_pattern,
+        "naming_folder_name_pattern": st.session_state.naming_folder_name_pattern,
     }
     try:
         with open(USER_SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -212,11 +234,17 @@ def sync_settings_from_file_to_state():
     st.session_state.translate_description = loaded_settings["translate_description"]
     st.session_state.keep_original_description = loaded_settings["keep_original_description"]
     st.session_state.genre_blacklist = loaded_settings.get("genre_blacklist", [])
+    st.session_state.naming_poster_filename_pattern = loaded_settings["naming_poster_filename_pattern"]
+    st.session_state.naming_folder_image_filename_pattern = loaded_settings["naming_folder_image_filename_pattern"]
+    st.session_state.naming_screenshot_filename_pattern = loaded_settings["naming_screenshot_filename_pattern"]
+    st.session_state.naming_nfo_title_pattern = loaded_settings["naming_nfo_title_pattern"]
+    st.session_state.naming_folder_name_pattern = loaded_settings["naming_folder_name_pattern"]
 
     print(f"  Synced input_dir: {st.session_state.input_dir}")
     print(f"  Synced output_dir: {st.session_state.output_dir}")
     print(f"  Synced enabled_scrapers: {st.session_state.enabled_scrapers}")
     print(f"  Synced genre_blacklist: {st.session_state.get('genre_blacklist')}")
+    print(f"  Synced NFO title pattern: {st.session_state.naming_nfo_title_pattern}")
 
 # --- Page Config & Styles ---
 st.set_page_config(page_title="JavOrganizer", layout="wide", initial_sidebar_state="collapsed")
@@ -255,6 +283,13 @@ if 'initialized' not in st.session_state:
     # Other states you might have
     st.session_state.genre_blacklist = loaded_settings.get("genre_blacklist", [])
     st.session_state.last_crawl_was_recursive = False
+
+    # Naming Convention Settings
+    st.session_state.naming_poster_filename_pattern = loaded_settings.get("naming_poster_filename_pattern", app_settings.DEFAULT_NAMING_POSTER_FILENAME_PATTERN)
+    st.session_state.naming_folder_image_filename_pattern = loaded_settings.get("naming_folder_image_filename_pattern", app_settings.DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN)
+    st.session_state.naming_screenshot_filename_pattern = loaded_settings.get("naming_screenshot_filename_pattern", app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN)
+    st.session_state.naming_nfo_title_pattern = loaded_settings.get("naming_nfo_title_pattern", app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN)
+    st.session_state.naming_folder_name_pattern = loaded_settings.get("naming_folder_name_pattern", app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN)
 
 
     if not st.session_state.enabled_scrapers:
@@ -343,11 +378,6 @@ def generate_nfo(data, filename, download_all_flag):
     content_id = data.get('content_id');
     uniqueid_type = data.get('source', 'unknown').split('_')[0]
     if content_id: ET.SubElement(movie, 'uniqueid', {'type': uniqueid_type, 'default': 'true'}).text = str(content_id)
-    fileinfo = ET.SubElement(movie, 'fileinfo'); streamdetails = ET.SubElement(fileinfo, 'streamdetails'); video = ET.SubElement(streamdetails, 'video');
-    for vtag in ['codec', 'aspect', 'width', 'height', 'durationinseconds', 'stereomode']: ET.SubElement(video, vtag).text = ''
-    audio = ET.SubElement(streamdetails, 'audio');
-    for atag in ['codec', 'language', 'channels']: ET.SubElement(audio, atag).text = ''
-    subtitle = ET.SubElement(streamdetails, 'subtitle'); ET.SubElement(subtitle, 'language').text = ''
     try:
         xml_str = ET.tostring(movie, encoding='UTF-8', method='xml'); xml_declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'; pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  "); pretty_xml_str = pretty_xml_str.replace('<?xml version="1.0" ?>', '', 1).strip(); final_xml = xml_declaration + pretty_xml_str; os.makedirs(os.path.dirname(filename), exist_ok=True);
         with open(filename, 'w', encoding='UTF-8') as f: f.write(final_xml)
@@ -437,6 +467,34 @@ def sanitize_filename(name):
     max_len = 250;
     while len(sanitized.encode('utf-8')) > max_len: sanitized = sanitized[:-1];
     sanitized = sanitized.strip(' .'); return sanitized
+
+# --- Helper function for Formatting Strings with Placeholders ---
+def format_string_with_placeholders(pattern_string, data_dict, screenshot_index=None):
+    """
+    Replaces placeholders in a pattern string with values from data_dict.
+    Available placeholders: {id}, {content_id}, {title}, {original_title},
+                           {year}, {studio}, {original_filename_base}, {n} (for screenshots)
+    """
+    if not isinstance(pattern_string, str): return ""
+    
+    # Ensure all potential keys exist in data_dict to avoid KeyErrors, defaulting to empty string
+    placeholders = {
+        'id': str(data_dict.get('id', '')),
+        'content_id': str(data_dict.get('content_id', '')),
+        'title': str(data_dict.get('title', '')),
+        'original_title': str(data_dict.get('original_title', '')),
+        'year': str(data_dict.get('year', '')),
+        'studio': str(data_dict.get('studio', '')),
+        'original_filename_base': str(data_dict.get('original_filename_base', ''))
+    }
+    if screenshot_index is not None:
+        placeholders['n'] = str(screenshot_index)
+
+    formatted_string = pattern_string
+    for key, value in placeholders.items():
+        formatted_string = formatted_string.replace(f"{{{key}}}", value)
+    
+    return formatted_string
 
 # --- Helper function for Folder Name ---
 def format_and_truncate_folder_name(id_val, studio_val, title_val, max_len=150):
@@ -1078,56 +1136,84 @@ def process_input_dir_callback():
                 # --- GENRE BLACKLIST BLOCK ---
 
 
-                # --- Final Data Preparation ---
+# --- Final Data Preparation ---
                 merged_data['_original_filename_base'] = original_filename_base_for_nfo
                 merged_data['id'] = id_used_for_successful_scrape # Use the ID that resulted in success
                 merged_data['original_filepath'] = filepath
                 merged_data['download_all'] = default_download_state
                 merged_data['_field_sources'] = field_sources
                 
-                # semantic_title_for_folder: use the (potentially translated) title for folder name generation
-                # title_raw is the original, non-translated title from the scraper (possibly prefixed)
-                # merged_data['title'] is the current title (potentially translated, possibly prefixed by scraper)
+                # --- Apply Naming Conventions ---
+                # 1. Prepare data for placeholder substitution
+                base_title_for_patterns = merged_data.get('title') or merged_data.get('title_raw') or 'NO_TITLE'
+                current_id_for_patterns = merged_data.get('id', 'NO_ID')
                 
-                # For folder name, we want the semantic part of the title (translated if applicable)
-                # Use merged_data['title'] (which is potentially translated) as the base for folder name title
-                semantic_title_for_folder_base = merged_data.get('title') or \
-                                 merged_data.get('title_raw') or \
-                                 'NO_TITLE'
+                semantic_title_for_patterns = base_title_for_patterns
+                # Strip ID prefix if present (e.g., from Javlibrary title) for a 'cleaner' semantic title
+                # This ensures {title} in patterns refers to the movie's actual title, not "ID - Title"
+                temp_id_prefix_for_strip1 = f"[{current_id_for_patterns}]" # Check for [ID] Title
+                temp_id_prefix_for_strip2 = f"{current_id_for_patterns} -" # Check for ID - Title
                 
-                # If semantic_title_for_folder_base is already prefixed by the ID that was used for scraping, strip it for folder name generation.
-                # This handles cases where a scraper (like Javlibrary) might return "ID - Title" and it gets translated.
-                # We want the folder to be "ID [Studio] - Translated Title" not "ID [Studio] - ID - Translated Title"
-                temp_id_prefix_for_strip = f"[{id_used_for_successful_scrape}]" # Check against the ID that worked
-                if semantic_title_for_folder_base.lower().startswith(temp_id_prefix_for_strip.lower()):
-                     semantic_title_for_folder = semantic_title_for_folder_base[len(temp_id_prefix_for_strip):].lstrip(" -").strip()
-                     if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE' # if stripping prefix leaves it empty
-                else:
-                    # Also check for "ID - Title" pattern if not "[ID] Title"
-                    alt_prefix_match = re.match(re.escape(id_used_for_successful_scrape) + r'\s*-\s*(.*)', semantic_title_for_folder_base, re.IGNORECASE)
-                    if alt_prefix_match:
-                        semantic_title_for_folder = alt_prefix_match.group(1).strip()
-                        if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
-                    else:
-                        semantic_title_for_folder = semantic_title_for_folder_base
+                if semantic_title_for_patterns.lower().startswith(temp_id_prefix_for_strip1.lower()):
+                    semantic_title_for_patterns = semantic_title_for_patterns[len(temp_id_prefix_for_strip1):].lstrip(" -").strip()
+                elif semantic_title_for_patterns.lower().startswith(temp_id_prefix_for_strip2.lower()):
+                     # More robustly find where the title starts after "ID - "
+                    match = re.match(re.escape(current_id_for_patterns) + r'\s*-\s*(.*)', semantic_title_for_patterns, re.IGNORECASE)
+                    if match:
+                        semantic_title_for_patterns = match.group(1).strip()
+                
+                if not semantic_title_for_patterns: semantic_title_for_patterns = 'NO_TITLE'
 
 
-                final_id_for_ops = merged_data.get('id', 'NO_ID') # This is id_used_for_successful_scrape
-                final_studio_for_ops = merged_data.get('maker', '')
+                placeholder_data = {
+                    'id': current_id_for_patterns,
+                    'content_id': merged_data.get('content_id', current_id_for_patterns),
+                    'title': semantic_title_for_patterns, 
+                    'original_title': merged_data.get('originaltitle', ''), # originaltitle is usually from scraper directly
+                    'year': str(merged_data.get('release_year', '')),
+                    'studio': merged_data.get('maker', ''),
+                    'original_filename_base': merged_data.get('_original_filename_base', '')
+                }
+
+                # 2. Generate Folder Name using pattern
+                folder_name_pattern_from_settings = st.session_state.get("naming_folder_name_pattern", app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN)
+                raw_folder_name = format_string_with_placeholders(folder_name_pattern_from_settings, placeholder_data)
                 
-                # Now, ensure the merged_data['title'] (for display/NFO) is correctly prefixed with final_id_for_ops
-                # Use the 'semantic_title_for_folder' as the content part for this prefixing.
-                if final_id_for_ops != 'NO_ID':
-                    merged_data['title'] = f"[{final_id_for_ops}] {semantic_title_for_folder}" if semantic_title_for_folder and semantic_title_for_folder != 'NO_TITLE' else f"[{final_id_for_ops}]"
-                else: # No ID, use semantic title as is (or empty if it was NO_TITLE)
-                    merged_data['title'] = semantic_title_for_folder if semantic_title_for_folder != 'NO_TITLE' else ""
+                # Sanitize the raw pattern output first
+                temp_folder_name = sanitize_filename(raw_folder_name) 
                 
-                merged_data['folder_name'] = format_and_truncate_folder_name(final_id_for_ops, final_studio_for_ops, semantic_title_for_folder) 
+                final_folder_name_for_data = temp_folder_name # Default to non-truncated
                 
-                # Ensure title_raw has a fallback. merge_scraped_data should set it, but as a safeguard:
+                max_folder_len = 150 # This should ideally be a system-aware max path component length or a safe value
+                
+                if len(temp_folder_name) > max_folder_len:
+                    # Perform truncation. The ellipsis is for visual representation if displayed,
+                    # but sanitize_filename will ultimately clean it for path safety.
+                    safe_truncate_point = max(0, max_folder_len - 3) # Ensure space for "..."
+                    truncated_name_with_ellipsis = temp_folder_name[:safe_truncate_point] + "..."
+                    
+                    # Sanitize AGAIN after adding ellipsis. This is critical.
+                    # This ensures "..." becomes "." and then is stripped by sanitize_filename's strip(' .')
+                    final_folder_name_for_data = sanitize_filename(truncated_name_with_ellipsis)
+                
+                # Ensure there's a non-empty folder name after all sanitization
+                if not final_folder_name_for_data:
+                    # Fallback to a sanitized ID or a generic name if ID is also problematic
+                    fallback_name = placeholder_data.get('id', 'movie_folder') # Use ID as a good fallback
+                    if not fallback_name: fallback_name = 'movie_folder' # Absolute fallback if ID was empty
+                    final_folder_name_for_data = sanitize_filename(fallback_name)
+                    # If even the sanitized ID is empty (e.g. ID was just "."), use a hardcoded name
+                    if not final_folder_name_for_data: final_folder_name_for_data = "untitled_movie" 
+
+                merged_data['folder_name'] = final_folder_name_for_data
+                
+                # 3. Generate NFO Title using pattern (This part should be fine)
+                nfo_title_pattern_from_settings = st.session_state.get("naming_nfo_title_pattern", app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN)
+                merged_data['title'] = format_string_with_placeholders(nfo_title_pattern_from_settings, placeholder_data)
+                
+                # Ensure title_raw has a fallback.
                 if 'title_raw' not in merged_data or not merged_data.get('title_raw'):
-                    # Fallback to originaltitle or the semantic part used for folder name if title_raw is missing
-                    merged_data['title_raw'] = merged_data.get('originaltitle', semantic_title_for_folder if semantic_title_for_folder != 'NO_TITLE' else "")
+                    merged_data['title_raw'] = merged_data.get('originaltitle', semantic_title_for_patterns if semantic_title_for_patterns != 'NO_TITLE' else "")
                 
                 st.session_state.all_movie_data[filepath] = merged_data
                 processed_files += 1
@@ -1222,6 +1308,12 @@ def organize_all_callback():
     if not crop_script_exists:
         st.warning(f"Crop script 'crop.py' not found in the application directory ({script_dir}). Folder images cannot be generated.")
 
+    # --- Load Naming Patterns Once ---
+    poster_filename_pattern = st.session_state.get("naming_poster_filename_pattern", app_settings.DEFAULT_NAMING_POSTER_FILENAME_PATTERN)
+    folder_image_filename_pattern = st.session_state.get("naming_folder_image_filename_pattern", app_settings.DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN)
+    screenshot_filename_pattern = st.session_state.get("naming_screenshot_filename_pattern", app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN)
+
+
     with st.spinner(f"Organizing {total_movies} movies..."):
         for i, (original_filepath, data) in enumerate(st.session_state.all_movie_data.items()):
             original_basename = os.path.basename(original_filepath)
@@ -1229,65 +1321,94 @@ def organize_all_callback():
             download_all_flag = data.get('download_all', False)
 
             try:
-                # Get the standard (formatted) ID for logging/messaging
-                movie_id_for_logs = data.get('id', 'UNKNOWN_ID')
+                movie_id_for_logs = data.get('id', 'UNKNOWN_ID') # Standard ID for logging
+
+                # Prepare placeholder data for filename formatting
+                # Use the 'semantic' title (post-translation, pre-NFO pattern) for filenames
+                # Reconstruct semantic title if needed (similar to process_input_dir_callback)
+                base_title_for_filenames = data.get('title') # This is already NFO-patterned. We need pre-pattern.
+                                                            # title_raw is also an option, or originaltitle
+                                                            # Let's assume title_raw is the best "semantic" title before NFO formatting
+                
+                # To get the 'semantic' title for filenames, we might need to re-derive it
+                # or ensure it's stored separately. For now, use title_raw as a proxy for semantic title.
+                # A more robust way would be to store the semantic title explicitly during crawl.
+                # Using title_raw which should be the pre-NFO-formatted title.
+                
+                # Re-derive semantic_title from title_raw or originaltitle for filename patterns
+                # This semantic_title should be the movie's actual title, not prefixed by ID or patterns.
+                # Let's use originaltitle as a safe bet for a clean title, or title_raw if originaltitle is empty.
+                title_raw_from_data = data.get('title_raw', '')
+                original_title_from_data = data.get('originaltitle', '')
+                
+                semantic_title_for_filenames = title_raw_from_data if title_raw_from_data else original_title_from_data
+                if not semantic_title_for_filenames: # Fallback if both are empty
+                    # Try to strip from current data['title'] if it's patterned like "[ID] Actual Title"
+                    current_nfo_title = data.get('title', '')
+                    id_from_data = data.get('id', '')
+                    if id_from_data and current_nfo_title.startswith(f"[{id_from_data}]"):
+                        semantic_title_for_filenames = current_nfo_title[len(id_from_data)+2:].strip()
+                    elif id_from_data and re.match(re.escape(id_from_data) + r'\s*-\s*(.*)', current_nfo_title, re.IGNORECASE):
+                        match_title_strip = re.match(re.escape(id_from_data) + r'\s*-\s*(.*)', current_nfo_title, re.IGNORECASE)
+                        if match_title_strip: semantic_title_for_filenames = match_title_strip.group(1).strip()
+                    else:
+                        semantic_title_for_filenames = "NO_TITLE_FOR_FILENAME"
+
+
+                filename_placeholder_data = {
+                    'id': data.get('id', ''),
+                    'content_id': data.get('content_id', data.get('id', '')),
+                    'title': semantic_title_for_filenames,
+                    'original_title': data.get('originaltitle', ''),
+                    'year': str(data.get('release_year', '')),
+                    'studio': data.get('maker', ''),
+                    'original_filename_base': data.get('_original_filename_base', '')
+                }
+
 
                 if not os.path.exists(original_filepath):
                     st.toast(f"Skip: Original file '{original_basename}' not found.", icon="⚠️"); error_count += 1; continue
 
                 # --- Determine Target Directory based on Mode ---
                 if is_recursive_run:
-                    # Recursive: Target directory is the folder containing the original movie
                     target_dir = os.path.dirname(original_filepath)
-                    print(f"[DEBUG ORGANIZE RECURSIVE] Target dir for NFO/images: '{target_dir}'")
                 else:
-                    # Non-Recursive: Construct new folder in the global output directory
-                    folder_name_from_data = data.get('folder_name')
-                    if folder_name_from_data and str(folder_name_from_data).strip():
-                         final_folder_name_before_sanitize = str(folder_name_from_data).strip()
-                    else:
-                         fb_id = data.get('id', 'NO_ID'); fb_studio = data.get('maker', ''); fb_title = data.get('title', data.get('title_raw', 'NO_TITLE'))
-                         final_folder_name_before_sanitize = format_and_truncate_folder_name(fb_id, fb_studio, fb_title)
-                    sanitized_folder_name = sanitize_filename(final_folder_name_before_sanitize)
-                    if not sanitized_folder_name: sanitized_folder_name = sanitize_filename(movie_id_for_logs) # Use standard ID as fallback
+                    folder_name_from_data = data.get('folder_name') # This is already pattern-generated and sanitized/truncated
+                    if not folder_name_from_data: # Fallback if folder_name somehow missing
+                         fb_id = data.get('id', 'NO_ID'); fb_studio = data.get('maker', ''); fb_title = data.get('title_raw', 'NO_TITLE_FB')
+                         folder_name_from_data = sanitize_filename(f"{fb_id} {fb_studio} {fb_title}")
 
-                    target_dir = os.path.join(global_output_dir, sanitized_folder_name)
-                    print(f"[DEBUG ORGANIZE NON-RECURSIVE] Target dir for new folder: '{target_dir}'")
+                    target_dir = os.path.join(global_output_dir, folder_name_from_data) # folder_name_from_data is already sanitized
 
-                    # Safety Check (Only relevant for non-recursive)
                     crawl_input_dir = load_settings().get("input_dir", "")
                     if not crawl_input_dir: crawl_input_dir = st.session_state.get("input_dir", "")
                     abs_target_dir = os.path.abspath(target_dir)
                     abs_crawl_input_dir = os.path.abspath(crawl_input_dir) if crawl_input_dir else None
                     if abs_crawl_input_dir and abs_target_dir == abs_crawl_input_dir:
-                         st.toast(f"Skip: Output folder '{sanitized_folder_name}' is same as crawl Input Dir for '{original_basename}'.", icon="❗")
+                         st.toast(f"Skip: Output folder '{folder_name_from_data}' is same as crawl Input Dir for '{original_basename}'.", icon="❗")
                          error_count += 1
                          continue
-
-                # --- Create Target Directory (safe for both modes) ---
-                # In recursive mode, dir already exists, exist_ok=True handles it.
-                # In non-recursive mode, creates the new folder.
                 os.makedirs(target_dir, exist_ok=True)
 
-                # --- NFO Generation (Uses the correct target_dir now) ---
-                nfo_base_name_to_use = data.get('_original_filename_base')
-                if not nfo_base_name_to_use:
-                     logging.warning(f"Original filename base not found for '{original_basename}', falling back to formatted ID '{movie_id_for_logs}' for NFO name.")
-                     nfo_base_name_to_use = movie_id_for_logs
+                # --- NFO Generation ---
+                nfo_base_name_to_use = data.get('_original_filename_base', movie_id_for_logs)
                 sanitized_nfo_filename_base = sanitize_filename(nfo_base_name_to_use)
-                if not sanitized_nfo_filename_base:
-                    sanitized_nfo_filename_base = sanitize_filename(movie_id_for_logs)
-
                 nfo_filename = f"{sanitized_nfo_filename_base}.nfo"
                 nfo_path = os.path.join(target_dir, nfo_filename)
                 generate_nfo(data, filename=nfo_path, download_all_flag=download_all_flag)
                 processed_image_count_this_movie = 0
 
-                # --- Image Download Helper (Definition unchanged) ---
-                def download_image(url, base_filename, current_target_dir, source_page_url="", log_movie_id="UNKNOWN"):
+                def download_image(url, base_filename_pattern, current_target_dir, placeholder_data_for_img, source_page_url="", log_movie_id="UNKNOWN", screenshot_idx_for_pattern=None):
                     nonlocal processed_image_count_this_movie
                     if not url: return None
-                    abs_url = urljoin(source_page_url, url); safe_base_filename = sanitize_filename(base_filename); potential_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+                    
+                    # Format the base filename using the pattern and data
+                    formatted_base_filename = format_string_with_placeholders(base_filename_pattern, placeholder_data_for_img, screenshot_index=screenshot_idx_for_pattern)
+                    safe_base_filename = sanitize_filename(formatted_base_filename)
+                    if not safe_base_filename: safe_base_filename = sanitize_filename(log_movie_id + ("_img" if screenshot_idx_for_pattern is None else f"_ss{screenshot_idx_for_pattern}"))
+
+
+                    abs_url = urljoin(source_page_url, url); potential_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
                     existing_file = None
                     for ext in potential_extensions:
                         potential_path = os.path.join(current_target_dir, f"{safe_base_filename}{ext}")
@@ -1308,11 +1429,10 @@ def organize_all_callback():
                         else:
                             print(f"[DEBUG DL] Image '{final_filename}' already exists in {current_target_dir} (checked again).")
                             return final_target_img_path
-                    except requests.exceptions.Timeout: st.toast(f"DL Timeout: '{base_filename}' for {log_movie_id}.", icon="⏱️")
-                    except requests.exceptions.RequestException as e: st.toast(f"DL Fail: '{base_filename}' for {log_movie_id} ({e}).", icon="❌")
-                    except Exception as e: st.toast(f"DL Error: '{base_filename}' for {log_movie_id} ({e}).", icon="💥")
+                    except requests.exceptions.Timeout: st.toast(f"DL Timeout: '{safe_base_filename}' for {log_movie_id}.", icon="⏱️")
+                    except requests.exceptions.RequestException as e: st.toast(f"DL Fail: '{safe_base_filename}' for {log_movie_id} ({e}).", icon="❌")
+                    except Exception as e: st.toast(f"DL Error: '{safe_base_filename}' for {log_movie_id} ({e}).", icon="💥")
                     return None
-                # --- End Image Download Helper ---
 
                 source_url = data.get('url', ''); screenshot_urls = data.get('screenshot_urls', [])
 
@@ -1320,18 +1440,30 @@ def organize_all_callback():
                 poster_url_to_download = data.get('poster_manual_url') or get_auto_poster_url(data)
                 downloaded_poster_path = None
                 if poster_url_to_download:
-                    downloaded_poster_path = download_image(poster_url_to_download, "fanart", target_dir, source_url, log_movie_id=movie_id_for_logs)
+                    downloaded_poster_path = download_image(
+                        poster_url_to_download, 
+                        poster_filename_pattern, # Use pattern
+                        target_dir, 
+                        filename_placeholder_data, # Pass placeholder data
+                        source_url, 
+                        log_movie_id=movie_id_for_logs
+                    )
                 else:
                     print(f"[DEBUG ORGANIZE] No poster URL for {movie_id_for_logs}.")
 
                 # --- Folder Image Generation ---
                 if downloaded_poster_path and os.path.exists(downloaded_poster_path) and crop_script_exists:
                     poster_ext = os.path.splitext(downloaded_poster_path)[1]
-                    folder_img_path = os.path.join(target_dir, f"folder{poster_ext}")
+                    # Format folder image filename using pattern
+                    folder_img_base_name_formatted = format_string_with_placeholders(folder_image_filename_pattern, filename_placeholder_data)
+                    folder_img_base_name_safe = sanitize_filename(folder_img_base_name_formatted)
+                    if not folder_img_base_name_safe: folder_img_base_name_safe = sanitize_filename(movie_id_for_logs + "_folder_fallback")
+
+                    folder_img_path = os.path.join(target_dir, f"{folder_img_base_name_safe}{poster_ext}") # Use poster's extension
+                    
                     if not os.path.exists(folder_img_path):
                         try:
                             cmd = [sys.executable, crop_script_path, downloaded_poster_path, folder_img_path]
-                            # ... (rest of crop execution logic) ...
                             print(f"--- DEBUG: Running crop command: {' '.join(cmd)}")
                             result = subprocess.run(cmd, capture_output=True, text=True, check=False, encoding='utf-8', timeout=15)
                             if result.returncode == 0 and os.path.exists(folder_img_path):
@@ -1353,18 +1485,24 @@ def organize_all_callback():
                 elif not downloaded_poster_path or not os.path.exists(downloaded_poster_path): print(f"[DEBUG CROP] Skipping folder img gen for '{original_basename}', poster issue.")
                 elif not crop_script_exists: print(f"[DEBUG CROP] Skipping folder img gen for '{original_basename}', crop.py missing.")
 
-
-                # --- Screenshot Download (Uses the correct target_dir now) ---
+                # --- Screenshot Download ---
                 if download_all_flag:
                     actual_poster_url_downloaded = poster_url_to_download
                     screenshots_to_process = [ss_url for ss_url in screenshot_urls if ss_url and ss_url != actual_poster_url_downloaded]
                     if screenshots_to_process: print(f"[DEBUG ORGANIZE] Downloading {len(screenshots_to_process)} screenshots to {target_dir}...")
                     for ss_idx, url_img in enumerate(screenshots_to_process):
-                        download_image(url_img, f"screenshot_{ss_idx+1}", target_dir, source_url, log_movie_id=movie_id_for_logs)
+                        download_image(
+                            url_img, 
+                            screenshot_filename_pattern, # Use pattern
+                            target_dir, 
+                            filename_placeholder_data, # Pass placeholder data
+                            source_url, 
+                            log_movie_id=movie_id_for_logs,
+                            screenshot_idx_for_pattern=ss_idx + 1 # Pass index for {n}
+                        )
 
                 # --- Conditional Move Movie File ---
                 if not is_recursive_run:
-                    # Only move the file if NOT in recursive mode
                     target_movie_path = os.path.join(target_dir, original_basename)
                     abs_target_movie_path = os.path.abspath(target_movie_path)
                     abs_original_filepath = os.path.abspath(original_filepath)
@@ -1385,9 +1523,7 @@ def organize_all_callback():
                         st.toast(f"Skip move: Source/Target path identical for '{original_basename}'.", icon="ℹ️")
                         skipped_move_count += 1
                 else:
-                    # Recursive mode: Log that move is skipped
                     print(f"[DEBUG ORGANIZE RECURSIVE] Skipping move for '{original_basename}'. File remains in '{os.path.dirname(original_filepath)}'.")
-
 
                 processed_count += 1
             except Exception as e:
@@ -1397,11 +1533,11 @@ def organize_all_callback():
             progress_bar.progress((i + 1) / total_movies)
 
     # --- End Main Loop ---
-    status_text.text(f"Organization complete. Processed: {processed_count}. Errors: {error_count}. Skipped Moves (Non-Recursive): {skipped_move_count}.") # Adjusted message
+    status_text.text(f"Organization complete. Processed: {processed_count}. Errors: {error_count}. Skipped Moves (Non-Recursive): {skipped_move_count}.")
     if progress_bar: progress_bar.empty()
     if processed_count > 0: st.toast(f"💾 Successfully organized {processed_count} movies!", icon="🎉")
     elif error_count == 0 and skipped_move_count == 0 and total_movies > 0 and not is_recursive_run: st.toast("No movies needed organization (already done?).", icon="🤷")
-    elif error_count == 0 and total_movies > 0 and is_recursive_run: st.toast("Finished placing NFO/images in existing folders.", icon="✅") # Different message for recursive success
+    elif error_count == 0 and total_movies > 0 and is_recursive_run: st.toast("Finished placing NFO/images in existing folders.", icon="✅") 
     elif total_movies == 0 : st.toast("No movie data to organize.", icon="🤷")
 
 
@@ -1648,39 +1784,67 @@ def rescrape_with_url_callback():
         processed_data_for_movie['genres'] = filtered_movie_genres
 
     status_placeholder.info("Finalizing data...")
-    final_id_for_formatting = processed_data_for_movie.get('id', 'NO_ID')
-    final_studio_for_formatting = processed_data_for_movie.get('maker', '')
+    
+    # --- Apply Naming Conventions ---
+    # 1. Prepare data for placeholder substitution
+    base_title_for_patterns = processed_data_for_movie.get('title') or processed_data_for_movie.get('title_raw') or 'NO_TITLE'
+    current_id_for_patterns = processed_data_for_movie.get('id', 'NO_ID')
 
+    semantic_title_for_patterns = base_title_for_patterns
+    temp_id_prefix_for_strip1 = f"[{current_id_for_patterns}]"
+    temp_id_prefix_for_strip2 = f"{current_id_for_patterns} -"
+
+    if semantic_title_for_patterns.lower().startswith(temp_id_prefix_for_strip1.lower()):
+        semantic_title_for_patterns = semantic_title_for_patterns[len(temp_id_prefix_for_strip1):].lstrip(" -").strip()
+    elif semantic_title_for_patterns.lower().startswith(temp_id_prefix_for_strip2.lower()):
+        match = re.match(re.escape(current_id_for_patterns) + r'\s*-\s*(.*)', semantic_title_for_patterns, re.IGNORECASE)
+        if match:
+            semantic_title_for_patterns = match.group(1).strip()
+    if not semantic_title_for_patterns: semantic_title_for_patterns = 'NO_TITLE'
+
+    placeholder_data = {
+        'id': current_id_for_patterns,
+        'content_id': processed_data_for_movie.get('content_id', current_id_for_patterns),
+        'title': semantic_title_for_patterns,
+        'original_title': processed_data_for_movie.get('originaltitle', ''),
+        'year': str(processed_data_for_movie.get('release_year', '')),
+        'studio': processed_data_for_movie.get('maker', ''),
+        'original_filename_base': processed_data_for_movie.get('_original_filename_base', '')
+    }
+
+    # 2. Generate Folder Name using pattern
+    folder_name_pattern_from_settings = st.session_state.get("naming_folder_name_pattern", app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN)
+    raw_folder_name = format_string_with_placeholders(folder_name_pattern_from_settings, placeholder_data)
+
+    # Sanitize the raw pattern output first
+    temp_folder_name = sanitize_filename(raw_folder_name)
+
+    final_folder_name_for_data = temp_folder_name # Default to non-truncated
+
+    max_folder_len = 150
+
+    if len(temp_folder_name) > max_folder_len:
+        safe_truncate_point = max(0, max_folder_len - 3)
+        truncated_name_with_ellipsis = temp_folder_name[:safe_truncate_point] + "..."
+        final_folder_name_for_data = sanitize_filename(truncated_name_with_ellipsis)
+
+    if not final_folder_name_for_data:
+        fallback_name = placeholder_data.get('id', 'movie_folder')
+        if not fallback_name: fallback_name = 'movie_folder'
+        final_folder_name_for_data = sanitize_filename(fallback_name)
+        if not final_folder_name_for_data: final_folder_name_for_data = "untitled_movie"
+        
+    processed_data_for_movie['folder_name'] = final_folder_name_for_data
+
+    # 3. Generate NFO Title using pattern
+    nfo_title_pattern_from_settings = st.session_state.get("naming_nfo_title_pattern", app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN)
+    processed_data_for_movie['title'] = format_string_with_placeholders(nfo_title_pattern_from_settings, placeholder_data)
+
+    # Ensure 'title_raw' is present
     if 'title_raw' not in processed_data_for_movie or not processed_data_for_movie.get('title_raw'):
-        processed_data_for_movie['title_raw'] = merged_data.get('title', merged_data.get('originaltitle', ''))
-
-    semantic_title_for_folder_base = processed_data_for_movie.get('title', processed_data_for_movie.get('title_raw', 'NO_TITLE'))
-    semantic_title_for_folder = semantic_title_for_folder_base
-    if final_id_for_formatting != 'NO_ID':
-        temp_id_prefix_for_strip = f"[{final_id_for_formatting}]"
-        if semantic_title_for_folder_base.lower().startswith(temp_id_prefix_for_strip.lower()):
-             semantic_title_for_folder = semantic_title_for_folder_base[len(temp_id_prefix_for_strip):].lstrip(" -").strip()
-             if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
-        else:
-            alt_prefix_match = re.match(re.escape(final_id_for_formatting) + r'\s*-\s*(.*)', semantic_title_for_folder_base, re.IGNORECASE)
-            if alt_prefix_match:
-                semantic_title_for_folder = alt_prefix_match.group(1).strip()
-                if not semantic_title_for_folder: semantic_title_for_folder = 'NO_TITLE'
-
-    current_semantic_title_for_display = processed_data_for_movie.get('title', '')
-    if final_id_for_formatting != 'NO_ID':
-        prefix_to_check = f"[{final_id_for_formatting}]"
-        if current_semantic_title_for_display and not current_semantic_title_for_display.lower().startswith(prefix_to_check.lower()):
-            processed_data_for_movie['title'] = f"[{final_id_for_formatting}] {current_semantic_title_for_display}"
-        elif not current_semantic_title_for_display:
-            processed_data_for_movie['title'] = f"[{final_id_for_formatting}]"
-
-    processed_data_for_movie['folder_name'] = format_and_truncate_folder_name(
-        final_id_for_formatting,
-        final_studio_for_formatting,
-        semantic_title_for_folder
-    )
-
+        processed_data_for_movie['title_raw'] = processed_data_for_movie.get('originaltitle', semantic_title_for_patterns if semantic_title_for_patterns != 'NO_TITLE' else "")
+    
+    # Ensure 'originaltitle' (for NFO) has a value if possible
     if 'originaltitle' not in processed_data_for_movie or not processed_data_for_movie.get('originaltitle'):
         processed_data_for_movie['originaltitle'] = processed_data_for_movie.get('title_raw', '')
 
@@ -1733,30 +1897,34 @@ def save_settings_callback():
     # Update field priorities from text inputs
     new_priorities = {}
     try:
-        # Create a mapping for case-insensitive lookup: lowercase name -> canonical name
         available_scrapers_lower = {name.lower(): name for name in AVAILABLE_SCRAPER_NAMES}
-
-        # Use the updated ordered list from settings (which shouldn't have folder_url)
         for field_key in app_settings.PRIORITY_FIELDS_ORDERED:
             input_key = f"priority_{field_key}"
             if input_key in st.session_state:
                 priority_str = st.session_state[input_key].strip()
                 user_priority_list = [s.strip() for s in priority_str.split(',') if s.strip()]
-
-                # Validate user input case-insensitively and store canonical names, preserving order
                 validated_list = []
                 for name in user_priority_list:
                     if name.lower() in available_scrapers_lower:
                         validated_list.append(available_scrapers_lower[name.lower()])
-
                 new_priorities[field_key] = validated_list
             else:
-                 # Fallback to current state if widget key missing
                  new_priorities[field_key] = st.session_state.field_priorities.get(field_key, [])
         st.session_state.field_priorities = new_priorities
         print(f"Updated field_priorities: {st.session_state.field_priorities}")
     except Exception as e:
          st.error(f"Error processing field priorities: {e}"); return
+
+    # Update Naming Convention Patterns from UI inputs
+    st.session_state.naming_poster_filename_pattern = st.session_state.get("ui_naming_poster_filename_pattern", app_settings.DEFAULT_NAMING_POSTER_FILENAME_PATTERN)
+    st.session_state.naming_folder_image_filename_pattern = st.session_state.get("ui_naming_folder_image_filename_pattern", app_settings.DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN)
+    st.session_state.naming_screenshot_filename_pattern = st.session_state.get("ui_naming_screenshot_filename_pattern", app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN)
+    st.session_state.naming_nfo_title_pattern = st.session_state.get("ui_naming_nfo_title_pattern", app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN)
+    st.session_state.naming_folder_name_pattern = st.session_state.get("ui_naming_folder_name_pattern", app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN)
+    print(f"Updated NFO title pattern: {st.session_state.naming_nfo_title_pattern}")
+    print(f"Updated Folder name pattern: {st.session_state.naming_folder_name_pattern}")
+    print(f"Updated Poster filename pattern: {st.session_state.naming_poster_filename_pattern}")
+
 
     # Directories are now directly updated in session state via shared keys
     print(f"Input directory state: {st.session_state.input_dir}")
@@ -1768,27 +1936,19 @@ def save_settings_callback():
     print(f"Translate Title: {st.session_state.translate_title}")
     print(f"Translate Description: {st.session_state.translate_description}")
     print(f"Keep Original Desc: {st.session_state.keep_original_description}")
-    # API key is intentionally not printed to console
 
     # --- GENRE BLACKLIST ---
     if "ui_genre_blacklist_input_settings" in st.session_state:
         blacklist_input_str = st.session_state.ui_genre_blacklist_input_settings
-        
         if isinstance(blacklist_input_str, str) and blacklist_input_str.strip():
-            parsed_blacklist = [
-                genre.strip().lower() 
-                for genre in blacklist_input_str.split(',') 
-                if genre.strip()
-            ]
+            parsed_blacklist = [genre.strip().lower() for genre in blacklist_input_str.split(',') if genre.strip()]
             st.session_state.genre_blacklist = sorted(list(set(parsed_blacklist)))
         else: 
             st.session_state.genre_blacklist = [] 
-        
         print(f"Updated st.session_state.genre_blacklist from UI: {st.session_state.genre_blacklist}")
-    elif "genre_blacklist" not in st.session_state: # Ensure key exists even if UI element somehow missing
+    elif "genre_blacklist" not in st.session_state:
          st.session_state.genre_blacklist = []
          print("Warning: 'ui_genre_blacklist_input_settings' not in st.session_state, initialized genre_blacklist to empty.")
-    # --- GENRE BLACKLIST ---
 
     save_settings_to_file()
 
@@ -2251,6 +2411,26 @@ def show_settings_page():
             value=current_blacklist_display_str,
             height=100
         )
+
+        st.divider()
+
+        st.subheader("Naming Conventions")
+        naming_placeholders_help = (
+            "Available placeholders: `{id}`, `{content_id}`, `{title}` (semantic, post-translation), "
+            "`{original_title}`, `{year}`, `{studio}` (maker), `{original_filename_base}` (video filename without ext), "
+            "`{n}` (screenshot index, 1-based)."
+        )
+        st.caption(naming_placeholders_help)
+
+        naming_col1, naming_col2 = st.columns(2)
+        with naming_col1:
+            st.text_input("Folder Name Pattern", key="ui_naming_folder_name_pattern", value=st.session_state.naming_folder_name_pattern)
+            st.text_input("Title Pattern", key="ui_naming_nfo_title_pattern", value=st.session_state.naming_nfo_title_pattern)
+            st.text_input("Poster Filename Pattern", key="ui_naming_poster_filename_pattern", value=st.session_state.naming_poster_filename_pattern)
+        with naming_col2:
+            st.text_input("Folder Image Filename Pattern", key="ui_naming_folder_image_filename_pattern", value=st.session_state.naming_folder_image_filename_pattern)
+            st.text_input("Screenshot Filename Pattern", key="ui_naming_screenshot_filename_pattern", value=st.session_state.naming_screenshot_filename_pattern)
+
 
         st.divider()
 

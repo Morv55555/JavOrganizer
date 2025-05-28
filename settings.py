@@ -28,6 +28,15 @@ DEFAULT_GENRE_BLACKLIST = [
         "actress best compilation"
     ]
 
+# --- Naming Conventions ---
+# Placeholders: {id}, {content_id}, {title} (semantic, post-translation),
+# {original_title}, {year}, {studio}, {original_filename_base}, {n} (screenshot index)
+DEFAULT_NAMING_POSTER_FILENAME_PATTERN = "poster"
+DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN = "folder" # Kodi default, often preferred
+DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN = "fanart{n}" # Example: MOVIEID-fanart1.jpg
+DEFAULT_NAMING_NFO_TITLE_PATTERN = "[{id}] {title}"
+DEFAULT_NAMING_FOLDER_NAME_PATTERN = "{id} [{studio}] - {title}"
+
 # --- Field Priorities ---
 # Default order of scrapers to try for obtaining each field's value.
 # Added "R18.Dev JA" - adjust its position based on desired preference.
