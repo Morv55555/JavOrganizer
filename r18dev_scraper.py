@@ -143,11 +143,42 @@ def scrape_r18dev(url):
     data['series'] = final_series
     # --- >>> END ADJUSTMENT <<< ---
 
-    # --- Actresses (no change) ---
-    data['actresses'] = [] ; actresses = webRequest.get('actresses')
-    if actresses and isinstance(actresses, list):
-        for actor in actresses: name_romaji = actor.get('name_romaji');
-        if name_romaji: data['actresses'].append({'name': name_romaji.strip()})
+    # --- Actresses (corrected) ---
+    data['actresses'] = []
+    actresses_list_from_api = webRequest.get('actresses')
+
+    if actresses_list_from_api and isinstance(actresses_list_from_api, list):
+        for actor_data in actresses_list_from_api: # Iterate through each item
+            if isinstance(actor_data, dict):
+                final_actress_name = None
+                
+                # Try Romaji name first
+                name_romaji = actor_data.get('name_romaji')
+                if name_romaji:
+                    processed_romaji = html.unescape(str(name_romaji)).strip()
+                    if processed_romaji:
+                        final_actress_name = processed_romaji
+                
+                # Fallback to Kanji name if Romaji was not found or empty
+                if not final_actress_name:
+                    name_kanji = actor_data.get('name_kanji')
+                    if name_kanji:
+                        processed_kanji = html.unescape(str(name_kanji)).strip()
+                        if processed_kanji:
+                            final_actress_name = processed_kanji
+                
+                if final_actress_name:
+                    data['actresses'].append({'name': final_actress_name})
+                else:
+                    logging.debug(f"  Skipping actress - no valid Romaji or Kanji name found for data: {actor_data.get('id')}")
+            else:
+                logging.warning(f"  Skipping item in actresses list because it's not a dictionary: {actor_data}")
+        logging.info(f"Finished processing actresses. Added {len(data['actresses'])} actresses.")
+    elif actresses_list_from_api is not None:
+        logging.warning(f"Expected 'actresses' to be a list, but got type {type(actresses_list_from_api)}. Value: {actresses_list_from_api}")
+    else:
+        logging.debug("No 'actresses' key found in API response or it was null.")
+        
     # --- Genres (no change) ---
     data['genres'] = [] # Initialize empty list
     categories = webRequest.get('categories') # Get the list of category dictionaries

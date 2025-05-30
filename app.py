@@ -311,43 +311,135 @@ def get_auto_poster_url(data):
 
 # --- Generate NFO Function ---
 def generate_nfo(data, filename, download_all_flag):
-    # download_all_flag is now the per-movie value passed from organize_all_callback
+    # download_all_flag is the per-movie value
+
+    # Helper to add an element if value is not None/empty
+    def add_element(parent, tag_name, text_value, attributes=None):
+        if text_value is not None:
+            # Convert to string, strip, and check if non-empty
+            processed_text = str(text_value).strip()
+            if processed_text: # Only add if there's actual content after stripping
+                elem = ET.SubElement(parent, tag_name)
+                elem.text = processed_text
+                if attributes:
+                    for attr_name, attr_value in attributes.items():
+                        elem.set(attr_name, str(attr_value))
+                return elem
+        return None
+
+    # Helper to add an empty element (like <epbookmark />)
+    def add_empty_element(parent, tag_name, attributes=None):
+        elem = ET.SubElement(parent, tag_name)
+        if attributes:
+            for attr_name, attr_value in attributes.items():
+                elem.set(attr_name, str(attr_value))
+        return elem
+
     movie = ET.Element('movie')
-    # NFO Title field maps to the potentially translated 'title' from merged_data
-    field_mapping = { 'title': 'title', 'originaltitle': 'originaltitle', 'id': 'id', 'premiered': 'release_date', 'year': 'release_year', 'director': 'director', 'studio': 'maker', 'label': 'label', 'series': 'series', 'rating': 'rating', 'votes': 'votes', 'plot': 'description', 'runtime': 'runtime', 'mpaa': 'mpaa', 'tagline': 'tagline', 'set': 'set'}
+    base_page_url = data.get('url', '') # For resolving relative image URLs
 
-    for tag, key in field_mapping.items():
-        value = data.get(key);
-        if tag == 'set' and not value: value = data.get('series', '')
-        if tag == 'rating' and isinstance(value, dict): value = value.get('Rating')
-        if tag == 'votes' and isinstance(value, dict): value = value.get('Votes')
-        elem = ET.SubElement(movie, tag); elem.text = str(value) if value is not None else ''
+    # --- Order roughly based on blueprint ---
+    add_element(movie, 'title', data.get('title'))
+    add_element(movie, 'originaltitle', data.get('originaltitle'))
+    add_empty_element(movie, 'epbookmark')
+    add_element(movie, 'year', data.get('release_year'))
 
-    # Removed references to folder_url or folder_image_constructed_url for NFO generation
-    base_page_url = data.get('url', '') # Get the base URL for resolving relative paths
-    fanart_thumbs_to_add = [] # Initialize list for ALL fanart thumbs
+    # Ratings
+    rating_value_from_data = data.get('rating')
+    rating_val_to_use = None
+    votes_val_to_use = "0"
 
-    # 1. Get the primary image URL (what was previously the poster)
+    if isinstance(rating_value_from_data, dict):
+        rating_val_to_use = rating_value_from_data.get('Rating')
+        votes_val_to_use = str(rating_value_from_data.get('Votes', '0'))
+    elif rating_value_from_data is not None:
+        rating_val_to_use = rating_value_from_data
+
+    if rating_val_to_use is not None and str(rating_val_to_use).strip():
+        ratings_tag = ET.SubElement(movie, 'ratings')
+        rating_tag = add_element(ratings_tag, 'rating', None)
+        if rating_tag is not None:
+            rating_tag.set('name', 'NFO') # Blueprint has 'NFO' as name
+            rating_tag.set('default', 'true') # Changed from 'false' to 'true' as per blueprint (if this is the main rating)
+            rating_tag.set('max', '10')
+            add_element(rating_tag, 'value', rating_val_to_use)
+            add_element(rating_tag, 'votes', votes_val_to_use)
+
+    add_element(movie, 'userrating', "0.0") # As per blueprint
+    add_element(movie, 'top250', "0") # As per blueprint
+
+    # Set (Series)
+    series_name = data.get('series')
+    if series_name and str(series_name).strip():
+        set_tag = ET.SubElement(movie, 'set')
+        add_element(set_tag, 'name', series_name)
+        add_empty_element(set_tag, 'overview') # As per blueprint
+
+    add_element(movie, 'plot', data.get('description'))
+    add_element(movie, 'outline', data.get('description')) # Duplicate plot for outline
+    add_element(movie, 'tagline', data.get('tagline'))
+    add_element(movie, 'runtime', data.get('runtime'))
+
+    # Primary Poster Thumb (outside fanart)
     primary_image_url_to_use = data.get('poster_manual_url') or get_auto_poster_url(data)
     if primary_image_url_to_use:
         try:
-            # Add the primary image URL as the FIRST item for fanart
             abs_primary_url = urljoin(base_page_url, primary_image_url_to_use)
-            fanart_thumbs_to_add.insert(0, abs_primary_url) 
+            add_element(movie, 'thumb', abs_primary_url, attributes={'aspect': 'poster'})
+        except Exception as e:
+            st.warning(f"Could not process primary image URL {primary_image_url_to_use} for NFO <thumb>: {e}")
+
+    add_element(movie, 'mpaa', data.get('mpaa'))
+    add_empty_element(movie, 'certification') # As per blueprint
+    add_empty_element(movie, 'id') # Movie root ID tag, empty as per blueprint
+
+    add_element(movie, 'premiered', data.get('release_date'))
+    add_element(movie, 'watched', "false") # As per blueprint
+    add_element(movie, 'playcount', "0") # As per blueprint
+    add_empty_element(movie, 'lastplayed') # As per blueprint
+
+    # Genres
+    for genre_text in data.get('genres', []):
+        add_element(movie, 'genre', genre_text)
+
+    add_element(movie, 'studio', data.get('maker'))
+    add_element(movie, 'director', data.get('director'))
+
+    # Tag (from series name, as per blueprint)
+    if series_name and str(series_name).strip():
+        add_element(movie, 'tag', series_name)
+
+    # Actors
+    for actor_data in data.get('actresses', []):
+        actor_name = actor_data.get('name', '')
+        if actor_name and str(actor_name).strip():
+            actor_tag = ET.SubElement(movie, 'actor')
+            add_element(actor_tag, 'name', actor_name)
+            add_element(actor_tag, 'role', "Actress") # Fixed role as per blueprint example
+            add_empty_element(actor_tag, 'thumb') # Empty as per blueprint (unless we add actress thumbs)
+            add_empty_element(actor_tag, 'profile') # As per blueprint
+
+    add_empty_element(movie, 'trailer') # Empty for now, as per blueprint
+
+    # --- Fanart section ---
+    fanart_thumbs_to_add = [] # Initialize list for ALL fanart thumbs
+    # 1. Get the primary image URL (what was previously the poster)
+    # primary_image_url_to_use is already defined above
+    if primary_image_url_to_use:
+        try:
+            abs_primary_url = urljoin(base_page_url, primary_image_url_to_use)
+            fanart_thumbs_to_add.insert(0, abs_primary_url)
         except Exception as e:
             st.warning(f"Could not process primary image URL {primary_image_url_to_use} for NFO fanart: {e}")
 
     # 2. Add screenshots if flag is set
     if download_all_flag: # Use the flag passed into the function
         screenshot_urls = data.get('screenshot_urls', [])
-        # Ensure primary image isn't duplicated in screenshots
         primary_abs_url_for_check = fanart_thumbs_to_add[0] if fanart_thumbs_to_add else None
-
         for ss_url in screenshot_urls:
-            if ss_url: # Check if screenshot URL exists
+            if ss_url:
                  try:
                      abs_ss_url = urljoin(base_page_url, ss_url)
-                     # Avoid adding duplicates of primary or other screenshots
                      if abs_ss_url != primary_abs_url_for_check and abs_ss_url not in fanart_thumbs_to_add:
                           fanart_thumbs_to_add.append(abs_ss_url)
                  except Exception as e:
@@ -356,105 +448,208 @@ def generate_nfo(data, filename, download_all_flag):
     # 3. Create the <fanart> tag and add all collected <thumb> elements
     if fanart_thumbs_to_add:
         fanart = ET.SubElement(movie, 'fanart')
-        # Use the collected list directly (primary image is already first)
-        processed_urls = set() 
+        processed_urls = set()
         final_thumb_list = []
         for thumb_url in fanart_thumbs_to_add:
             if thumb_url not in processed_urls:
                 final_thumb_list.append(thumb_url)
                 processed_urls.add(thumb_url)
-
-        for thumb_url in final_thumb_list: 
+        for thumb_url in final_thumb_list:
             try:
                 ET.SubElement(fanart, 'thumb').text = thumb_url
             except Exception as e:
                 st.warning(f"Could not write fanart thumb {thumb_url} to NFO: {e}")
-    for genre in data.get('genres', []):
-        if genre: ET.SubElement(movie, 'genre').text = str(genre).strip()
-    for actor in data.get('actresses', []):
-        actor_name = actor.get('name', '');
-        if actor_name:
-            actor_tag = ET.SubElement(movie, 'actor'); ET.SubElement(actor_tag, 'name').text = str(actor_name).strip(); ET.SubElement(actor_tag, 'role').text = ''; ET.SubElement(actor_tag, 'thumb').text = ''
-    content_id = data.get('content_id');
-    uniqueid_type = data.get('source', 'unknown').split('_')[0]
-    if content_id: ET.SubElement(movie, 'uniqueid', {'type': uniqueid_type, 'default': 'true'}).text = str(content_id)
+    # --- END REVERTED fanart section ---
+
+
+    # Original Filename
+    original_basename_from_data = data.get('_original_filename_base')
+    original_filepath_from_data = data.get('original_filepath')
+    if original_basename_from_data and original_filepath_from_data:
+        try:
+            _, ext = os.path.splitext(os.path.basename(original_filepath_from_data))
+            if ext:
+                add_element(movie, 'original_filename', f"{original_basename_from_data}{ext}")
+        except Exception as e:
+            st.warning(f"Could not determine original_filename: {e}")
+
+    # Source (text field, e.g., "dmm_jp", as per blueprint)
+    add_element(movie, 'source', data.get('source', 'unknown'))
+    add_empty_element(movie, 'edition') # As per blueprint
+
+
+    # --- XML Output ---
     try:
-        xml_str = ET.tostring(movie, encoding='UTF-8', method='xml'); xml_declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'; pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  "); pretty_xml_str = pretty_xml_str.replace('<?xml version="1.0" ?>', '', 1).strip(); final_xml = xml_declaration + pretty_xml_str; os.makedirs(os.path.dirname(filename), exist_ok=True);
-        with open(filename, 'w', encoding='UTF-8') as f: f.write(final_xml)
-    except Exception as e: st.error(f"Error writing NFO file '{filename}': {e}"); raise IOError(f"Error writing NFO file '{filename}': {e}")
+        xml_str = ET.tostring(movie, encoding='UTF-8', method='xml')
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
+        pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
+        pretty_xml_str = pretty_xml_str.replace('<?xml version="1.0" ?>', '', 1).strip()
+        final_xml = xml_declaration + pretty_xml_str
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, 'w', encoding='UTF-8') as f:
+            f.write(final_xml)
+    except Exception as e:
+        st.error(f"Error writing NFO file '{filename}': {e}")
+        raise IOError(f"Error writing NFO file '{filename}': {e}")
 # --- End Generate NFO ---
 
 # --- Helper Function: Sanitize ID for Scrapers ---
 def sanitize_id_for_scraper(raw_id):
     """
     Cleans and formats an ID string (often from a filename) before sending it to scrapers.
-    Attempts to convert various formats (e.g., abc00123, h_1814nmsl00003, 118abf118)
-    into a more standard format (e.g., ABC-123, NMSL-003, ABF-118).
+    Attempts to convert various formats (e.g., abc00123, h_1814nmsl00003, 118abf118, abc-123-1080p)
+    into a more standard format (e.g., ABC-123, NMSL-003, ABF-118, ABC-123).
     """
     if not raw_id: return None
-    logging.debug(f"[SANITIZE] Original raw_id: {raw_id}") # Using logging from original
+    logging.debug(f"[SANITIZE] Original raw_id: {raw_id}")
 
-    # Clean prefixes commonly found in CIDs but not part of the standard ID
+    # --- 1. Prefix Cleaning ---
     prefixes_to_clean = [
-        'h_086', 'h_113', 'h_068', 'h_729', # Specific known h_ prefixes
-        r'^h_\d+_?',                     # Generic h_ followed by digits (and optional _)
-        r'^\d+'                         # Generic leading digits (e.g., 118abf118) - handled specially below
+        'h_086', 'h_113', 'h_068', 'h_729',
+        r'^h_\d+_?',
+        r'^\d+(?=[a-zA-Z])'
     ]
-    cleaned_cid_for_id = raw_id.lower() 
-    prefix_removed = False
+    id_after_prefix_clean = raw_id.lower()
     for prefix_pattern in prefixes_to_clean:
-        original_len = len(cleaned_cid_for_id)
-        # Special handling for leading digits: remove only if followed by letters
-        if prefix_pattern == r'^\d+':
-            cleaned_cid_for_id = re.sub(r'^\d+(?=[a-zA-Z])', '', cleaned_cid_for_id)
+        original_len = len(id_after_prefix_clean)
+        if prefix_pattern == r'^\d+(?=[a-zA-Z])':
+            id_after_prefix_clean = re.sub(prefix_pattern, '', id_after_prefix_clean)
         else:
-            # Use re.match for other prefixes to ensure they are at the beginning
-            match = re.match(prefix_pattern, cleaned_cid_for_id)
-            if match:
-                # Remove the matched part
-                cleaned_cid_for_id = cleaned_cid_for_id[len(match.group(0)):]
+            match_prefix = re.match(prefix_pattern, id_after_prefix_clean)
+            if match_prefix:
+                id_after_prefix_clean = id_after_prefix_clean[len(match_prefix.group(0)):]
+        if len(id_after_prefix_clean) < original_len:
+            logging.debug(f"[SANITIZE] Removed prefix matching '{prefix_pattern}'. Remaining: '{id_after_prefix_clean}'")
 
-        if len(cleaned_cid_for_id) < original_len:
-            logging.debug(f"[SANITIZE] Removed prefix matching '{prefix_pattern}'. Remaining: '{cleaned_cid_for_id}'")
-            prefix_removed = True
+    logging.debug(f"[SANITIZE] ID after prefix cleaning: '{id_after_prefix_clean}'")
 
-    # if not prefix_removed:
-    #     logging.debug("[SANITIZE] No prefixes removed based on defined patterns.")
+    # --- 2. Core ID Extraction and Trail Truncation ---
+    id_to_format = id_after_prefix_clean # Default
 
+    # Regex to identify the core JAV ID structure at the beginning of the string.
+    # Group 1: The entire matched core ID (e.g., "abc-123", "ebod123a", "studio-name-456vr")
+    # It looks for:
+    #   - A text part (letters, numbers, underscores, possibly internal hyphens)
+    #   - Optionally followed by a hyphen
+    #   - Followed by numbers
+    #   - Optionally followed by a short (0-4 char) alphabetic suffix.
+    # This needs to be anchored at the start of the string (after prefix cleaning).
+    # The (?=...) is a lookahead to check for common trail separators or end of string.
+    core_id_regex = r'^(([a-z0-9_]+(?:[-_][a-z0-9_]+)*?)\-?(\d+)([a-z]{0,4}))'
+    # Breakdown of the capturing group `(...)`:
+    # `([a-z0-9_]+(?:[-_][a-z0-9_]+)*?)` : Studio/text prefix (non-greedy to allow hyphen to be next)
+    # `\-?`                               : Optional hyphen
+    # `(\d+)`                             : Number part
+    # `([a-z]{0,4})`                      : Optional short suffix (like 'a', 'vr')
 
-    logging.debug(f"[SANITIZE] ID after prefix cleaning: '{cleaned_cid_for_id}'")
+    match = re.match(core_id_regex, id_after_prefix_clean)
 
-    # Standard ID formatting logic (e.g., ABC123 -> ABC-123)
-    match = re.match(r'([a-z_]+)(\d+)(.*)$', cleaned_cid_for_id, re.IGNORECASE) # Allow underscore in text part
     if match:
-        prefix_id = match.group(1).upper().replace('_', '') # Remove underscores from text part
-        number_id_str = match.group(2)
-        suffix_id = match.group(3).upper() # Get suffix
+        potential_core_id = match.group(1) # The full matched potential core ID
+        end_of_potential_core = match.end(1)
 
-        try:
-            if len(number_id_str) > 5:
-                 number_part = number_id_str 
+        # Check if there's anything after this potential core ID
+        if end_of_potential_core < len(id_after_prefix_clean):
+            char_after_core = id_after_prefix_clean[end_of_potential_core]
+            trail_separators = ['-', '_', '.', '['] # Common characters that indicate a trail
+            # Common trail keywords (lowercase) that might not have a separator
+            # (e.g., "id123cd" where "cd" is a trail, not part of the ID's suffix) - less common with good core_id_regex
+            # trail_keywords_pattern = r'^(cd|1080p|720p|hd|fullhd|uhd|4k|part|extra|uncensored|ch)'
+
+            if char_after_core in trail_separators:
+                id_to_format = potential_core_id
+                removed_trail = id_after_prefix_clean[end_of_potential_core:]
+                logging.debug(f"[SANITIZE] Trail '{removed_trail}' (separator: '{char_after_core}') identified. Core for formatting: '{id_to_format}'")
+            # else if re.match(trail_keywords_pattern, id_after_prefix_clean[end_of_potential_core:]):
+            #     id_to_format = potential_core_id
+            #     removed_trail = id_after_prefix_clean[end_of_potential_core:]
+            #     logging.debug(f"[SANITIZE] Trail '{removed_trail}' (keyword match) identified. Core for formatting: '{id_to_format}'")
             else:
-                 number_val = int(number_id_str)
-                 number_part = str(number_val).zfill(3) 
+                # If no common trail separator/keyword, assume the matched part is the full ID or needs to be handled by final formatting
+                # This path might be taken if the suffix in core_id_regex was shorter than actual, or if it's an unusual ID.
+                # We will still use `potential_core_id` if the regex matched something, otherwise `id_after_prefix_clean`
+                id_to_format = potential_core_id # Stick with what core_id_regex found as the best guess
+                logging.debug(f"[SANITIZE] Core ID regex matched '{potential_core_id}'. No clear trail separator immediately after. Proceeding with this for formatting.")
+        else:
+            # The core_id_regex matched the entire string
+            id_to_format = potential_core_id
+            logging.debug(f"[SANITIZE] Core ID regex matched the entire string: '{id_to_format}'. No trail.")
+    else:
+        logging.debug(f"[SANITIZE] Core ID regex did not match '{id_after_prefix_clean}'. Will use it as is for final formatting.")
+        # id_to_format remains id_after_prefix_clean
+
+    logging.debug(f"[SANITIZE] ID before final formatting: '{id_to_format}'")
+
+    # --- 3. Standard ID Formatting (applied to id_to_format) ---
+    # This regex splits the id_to_format into its main components:
+    # Group 1: The entire text/studio prefix part (e.g., "ebod", "studio-name-", "some_prefix_")
+    # Group 2: The numeric part (e.g., "123")
+    # Group 3: An optional short alphabetic suffix (0-4 chars, e.g., "a", "vr")
+    final_format_match = re.match(r'^(.*?)(\d+)([a-z]{0,4})$', id_to_format, re.IGNORECASE)
+
+    if final_format_match:
+        raw_text_part = final_format_match.group(1)
+        number_part_str = final_format_match.group(2)
+        raw_suffix_part = final_format_match.group(3) if final_format_match.group(3) else ""
+
+        formatted_text_part = raw_text_part.upper().replace('_', '')
+
+        padded_number_part = number_part_str
+        try:
+            if formatted_text_part.startswith("FC2") and len(number_part_str) > 5:
+                 padded_number_part = number_part_str
+            else:
+                 temp_num_str = number_part_str.lstrip('0')
+                 if not temp_num_str: temp_num_str = "0"
+                 if len(temp_num_str) <= 3 or (len(number_part_str) <=5 and len(temp_num_str) > 3) :
+                     padded_number_part = temp_num_str.zfill(3)
+                 else:
+                     padded_number_part = temp_num_str
         except ValueError:
-             # If conversion fails (shouldn't with \d+), fallback
-             number_part = number_id_str.zfill(3)
+             padded_number_part = number_part_str.zfill(3)
 
+        formatted_suffix_part = raw_suffix_part.upper()
 
-        # Combine parts
-        formatted_id = f"{prefix_id}-{number_part}{suffix_id}"
-        # Remove trailing hyphen if suffix was empty
-        if formatted_id.endswith('-'): formatted_id = formatted_id[:-1]
+        final_id_parts = []
+        if formatted_text_part:
+            # Remove trailing hyphen from text part if it's there, as we'll add one consistently
+            # unless it's something like FC2 which doesn't use hyphens.
+            if formatted_text_part.endswith('-') and not formatted_text_part.startswith("FC2"):
+                final_id_parts.append(formatted_text_part[:-1])
+            else:
+                final_id_parts.append(formatted_text_part)
+
+            # Add hyphen if text part exists and doesn't look like FC2 (which doesn't use hyphens)
+            if not formatted_text_part.startswith("FC2"):
+                final_id_parts.append('-')
+        
+        final_id_parts.append(padded_number_part)
+        final_id_parts.append(formatted_suffix_part)
+
+        formatted_id = "".join(final_id_parts)
+        
+        # Final cleanup: if it ended with a hyphen due to empty number/suffix and non-FC2 text part
+        if formatted_id.endswith('-') and not formatted_text_part.startswith("FC2") and not (padded_number_part or formatted_suffix_part):
+             formatted_id = formatted_id[:-1]
+
 
         logging.debug(f"[SANITIZE] Formatted ID: {formatted_id}")
         return formatted_id
     else:
-        # Fallback if standard pattern doesn't match after cleaning
-        # Simple uppercase is often sufficient as a fallback
-        fallback_id = cleaned_cid_for_id.upper().replace('_','')
-        logging.debug(f"[SANITIZE] Standard formatting pattern didn't match, using fallback: {fallback_id}")
-        return fallback_id
+        fallback_id = id_to_format.upper().replace('_','').replace('-','')
+        if not fallback_id and '-' in id_to_format:
+            parts = id_to_format.upper().split('-', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                num = parts[1].lstrip('0').zfill(3)
+                fallback_id = f"{parts[0].replace('_','')}-{num}"
+            elif len(parts) == 2 and re.match(r'^\d+[A-Z]{0,4}$', parts[1]):
+                 num_suffix_match = re.match(r'^(\d+)([A-Z]{0,4})$', parts[1])
+                 if num_suffix_match:
+                     num = num_suffix_match.group(1).lstrip('0').zfill(3)
+                     suf = num_suffix_match.group(2)
+                     fallback_id = f"{parts[0].replace('_','')}-{num}{suf}"
+        logging.debug(f"[SANITIZE] Final formatting pattern didn't match '{id_to_format}', using fallback: '{fallback_id if fallback_id else id_to_format.upper()}'")
+        return fallback_id if fallback_id else id_to_format.upper()
 # --- End Sanitize ID ---
 
 # --- Helper Functions: sanitize_filename ---
@@ -473,12 +668,12 @@ def format_string_with_placeholders(pattern_string, data_dict, screenshot_index=
     """
     Replaces placeholders in a pattern string with values from data_dict.
     Available placeholders: {id}, {content_id}, {title}, {original_title},
-                           {year}, {studio}, {original_filename_base}, {n} (for screenshots)
+                           {year}, {studio}, {original_filename_base}, {actress} or {actress:N}, {n} (for screenshots)
     """
     if not isinstance(pattern_string, str): return ""
     
-    # Ensure all potential keys exist in data_dict to avoid KeyErrors, defaulting to empty string
-    placeholders = {
+    # Prepare base placeholder values (excluding 'actress' as it's handled specially)
+    base_placeholders = {
         'id': str(data_dict.get('id', '')),
         'content_id': str(data_dict.get('content_id', '')),
         'title': str(data_dict.get('title', '')),
@@ -488,11 +683,43 @@ def format_string_with_placeholders(pattern_string, data_dict, screenshot_index=
         'original_filename_base': str(data_dict.get('original_filename_base', ''))
     }
     if screenshot_index is not None:
-        placeholders['n'] = str(screenshot_index)
+        base_placeholders['n'] = str(screenshot_index)
 
     formatted_string = pattern_string
-    for key, value in placeholders.items():
+
+    # Handle general placeholders first
+    for key, value in base_placeholders.items():
         formatted_string = formatted_string.replace(f"{{{key}}}", value)
+
+    # Special handling for {actress} or {actress:N}
+    actresses_data_list = data_dict.get('actresses', []) 
+    
+    all_actress_names_from_data = []
+    if actresses_data_list and isinstance(actresses_data_list, list):
+        for actress_item_dict in actresses_data_list:
+            if isinstance(actress_item_dict, dict) and 'name' in actress_item_dict:
+                actress_name_str = str(actress_item_dict['name']).strip()
+                if actress_name_str: 
+                    all_actress_names_from_data.append(actress_name_str)
+
+    def replace_actress_placeholder_match(match_obj):
+        limit_specifier_str = match_obj.group(1) 
+        
+        names_to_include_list = []
+        if not all_actress_names_from_data: 
+            return ""
+
+        if limit_specifier_str: # e.g., "3"
+            if limit_specifier_str.isdigit():
+                num_limit = int(limit_specifier_str)
+                if num_limit > 0:
+                    names_to_include_list = all_actress_names_from_data[:num_limit]
+        else: 
+            names_to_include_list = all_actress_names_from_data
+        
+        return ", ".join(names_to_include_list)
+
+    formatted_string = re.sub(r'(?i)\{actress(?:[:]([\d]+))?\}', replace_actress_placeholder_match, formatted_string)
     
     return formatted_string
 
@@ -1143,7 +1370,7 @@ def process_input_dir_callback():
                 merged_data['download_all'] = default_download_state
                 merged_data['_field_sources'] = field_sources
                 
-                # --- Apply Naming Conventions ---
+# --- Apply Naming Conventions ---
                 # 1. Prepare data for placeholder substitution
                 base_title_for_patterns = merged_data.get('title') or merged_data.get('title_raw') or 'NO_TITLE'
                 current_id_for_patterns = merged_data.get('id', 'NO_ID')
@@ -1164,6 +1391,11 @@ def process_input_dir_callback():
                 
                 if not semantic_title_for_patterns: semantic_title_for_patterns = 'NO_TITLE'
 
+                actresses_list_for_pattern = merged_data.get('actresses', [])
+                first_actress_name_for_pattern = ""
+                if actresses_list_for_pattern and isinstance(actresses_list_for_pattern[0], dict):
+                    first_actress_name_for_pattern = actresses_list_for_pattern[0].get('name', '')
+
 
                 placeholder_data = {
                     'id': current_id_for_patterns,
@@ -1172,7 +1404,8 @@ def process_input_dir_callback():
                     'original_title': merged_data.get('originaltitle', ''), # originaltitle is usually from scraper directly
                     'year': str(merged_data.get('release_year', '')),
                     'studio': merged_data.get('maker', ''),
-                    'original_filename_base': merged_data.get('_original_filename_base', '')
+                    'original_filename_base': merged_data.get('_original_filename_base', ''),
+                    'actresses': actresses_list_for_pattern # Pass the list for format_string_with_placeholders
                 }
 
                 # 2. Generate Folder Name using pattern
@@ -1355,6 +1588,9 @@ def organize_all_callback():
                         semantic_title_for_filenames = "NO_TITLE_FOR_FILENAME"
 
 
+                actresses_list_for_filename = data.get('actresses', [])
+
+
                 filename_placeholder_data = {
                     'id': data.get('id', ''),
                     'content_id': data.get('content_id', data.get('id', '')),
@@ -1362,7 +1598,8 @@ def organize_all_callback():
                     'original_title': data.get('originaltitle', ''),
                     'year': str(data.get('release_year', '')),
                     'studio': data.get('maker', ''),
-                    'original_filename_base': data.get('_original_filename_base', '')
+                    'original_filename_base': data.get('_original_filename_base', ''),
+                    'actresses': actresses_list_for_filename # Pass the list
                 }
 
 
@@ -1802,6 +2039,9 @@ def rescrape_with_url_callback():
             semantic_title_for_patterns = match.group(1).strip()
     if not semantic_title_for_patterns: semantic_title_for_patterns = 'NO_TITLE'
 
+    actresses_list_for_pattern_rescrape = processed_data_for_movie.get('actresses', [])
+    # first_actress_name_for_pattern_rescrape handled by format_string_with_placeholders
+
     placeholder_data = {
         'id': current_id_for_patterns,
         'content_id': processed_data_for_movie.get('content_id', current_id_for_patterns),
@@ -1809,7 +2049,8 @@ def rescrape_with_url_callback():
         'original_title': processed_data_for_movie.get('originaltitle', ''),
         'year': str(processed_data_for_movie.get('release_year', '')),
         'studio': processed_data_for_movie.get('maker', ''),
-        'original_filename_base': processed_data_for_movie.get('_original_filename_base', '')
+        'original_filename_base': processed_data_for_movie.get('_original_filename_base', ''),
+        'actresses': actresses_list_for_pattern_rescrape # Pass the list
     }
 
     # 2. Generate Folder Name using pattern
@@ -2417,7 +2658,9 @@ def show_settings_page():
         st.subheader("Naming Conventions")
         naming_placeholders_help = (
             "Available placeholders: `{id}`, `{content_id}`, `{title}` (semantic, post-translation), "
-            "`{original_title}`, `{year}`, `{studio}` (maker), `{original_filename_base}` (video filename without ext), "
+            "`{original_title}`, `{year}`, `{studio}` (maker), "
+            "`{actress}` (all actress names, comma-separated), or `{actress:N}` (first N names), "
+            "`{original_filename_base}` (video filename without ext), "
             "`{n}` (screenshot index, 1-based)."
         )
         st.caption(naming_placeholders_help)

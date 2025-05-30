@@ -154,23 +154,27 @@ def scrape_r18devja(url):
     # --- >>> Actresses Logic (JA - Kanji Only) <<< ---
     # Note: name_kanji might not always be present for actresses in the API
     data['actresses'] = []
-    actresses = webRequest.get('actresses')
-    if actresses and isinstance(actresses, list):
-        logging.debug(f"Processing {len(actresses)} actresses found.")
-        for actor in actresses:
-            if isinstance(actor, dict):
+    actresses_list_from_api = webRequest.get('actresses') # Renamed for clarity
+    if actresses_list_from_api and isinstance(actresses_list_from_api, list):
+        logging.debug(f"Processing {len(actresses_list_from_api)} potential actresses found.")
+        for actor_data in actresses_list_from_api: # Iterate through each item in the list
+            if isinstance(actor_data, dict):
                 # Prioritize Kanji name
-                actor_kanji = process_ja_field(actor.get('name_kanji'))
-                if actor_kanji:
-                    data['actresses'].append({'name': actor_kanji})
-                    logging.debug(f"  Added Japanese actress (kanji): '{actor_kanji}'")
+                actor_kanji_name = process_ja_field(actor_data.get('name_kanji'))
+                if actor_kanji_name: # Check if a valid Kanji name was processed
+                    data['actresses'].append({'name': actor_kanji_name})
+                    logging.debug(f"  Added Japanese actress (kanji): '{actor_kanji_name}'")
                 else:
-                    # Optionally log if Romaji was present but Kanji wasn't
-                    actor_romaji = actor.get('name_romaji')
-                    logging.debug(f"  Skipping actress - Japanese name (kanji) not found/empty. Romaji was: '{actor_romaji}'")
+                    # Optionally log if Romaji was present but Kanji wasn't, or just that Kanji was missing
+                    actor_romaji_name_for_log = actor_data.get('name_romaji')
+                    logging.debug(f"  Skipping actress - Japanese name (kanji) not found/empty. Romaji was: '{actor_romaji_name_for_log}' for data: {actor_data.get('id')}")
             else:
-                 logging.warning(f"  Skipping item in actresses list because it's not a dictionary: {actor}")
-        logging.info(f"Finished processing actresses. Found {len(data['actresses'])} with Japanese names.")
+                 logging.warning(f"  Skipping item in actresses list because it's not a dictionary: {actor_data}")
+        logging.info(f"Finished processing actresses. Added {len(data['actresses'])} with Japanese (Kanji) names.")
+    elif actresses_list_from_api is not None:
+        logging.warning(f"Expected 'actresses' to be a list, but got type {type(actresses_list_from_api)}. Value: {actresses_list_from_api}")
+    else:
+        logging.debug("No 'actresses' key found in API response or it was null.")
 
 
     # --- >>> Genres Logic (JA Only) <<< ---
