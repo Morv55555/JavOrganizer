@@ -8,6 +8,9 @@ DEFAULT_ENABLED_SCRAPERS = ["Dmm", "r18dev", "Mgs"] # Example: Enable all by def
 # --- Image Downloads ---
 DEFAULT_DOWNLOAD_ALL_INITIAL_STATE = False
 
+# --- Screenshots ---
+DEFAULT_EDITOR_SHOW_SCREENSHOTS = False
+
 # --- Directories ---
 DEFAULT_INPUT_DIRECTORY = ""
 DEFAULT_OUTPUT_DIRECTORY = ""

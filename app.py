@@ -37,6 +37,7 @@ except ImportError:
         DEFAULT_TRANSLATE_TITLE = False
         DEFAULT_TRANSLATE_DESCRIPTION = False
         DEFAULT_KEEP_ORIGINAL_DESCRIPTION = False
+        DEFAULT_EDITOR_SHOW_SCREENSHOTS = False
         DEFAULT_GENRE_BLACKLIST = []
         DEFAULT_NAMING_POSTER_FILENAME_PATTERN = "poster"
         DEFAULT_NAMING_FOLDER_IMAGE_FILENAME_PATTERN = "folder"
@@ -114,6 +115,7 @@ def load_settings():
         "naming_screenshot_filename_pattern": app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN,
         "naming_nfo_title_pattern": app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN,
         "naming_folder_name_pattern": app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN,
+        "editor_show_screenshots": app_settings.DEFAULT_EDITOR_SHOW_SCREENSHOTS,
     }
     # Filter defaults based on availability right away
     defaults["enabled_scrapers"] = [s for s in defaults["enabled_scrapers"] if s in AVAILABLE_SCRAPER_NAMES]
@@ -136,6 +138,7 @@ def load_settings():
             loaded_settings["default_download_all_initial_state"] = user_settings.get("default_download_all_initial_state", defaults["default_download_all_initial_state"])
             loaded_settings["input_dir"] = user_settings.get("input_dir", defaults["input_dir"])
             loaded_settings["output_dir"] = user_settings.get("output_dir", defaults["output_dir"])
+            loaded_settings["editor_show_screenshots"] = user_settings.get("editor_show_screenshots", defaults["editor_show_screenshots"])
 
             # Load and validate enabled scrapers
             user_enabled = user_settings.get("enabled_scrapers", [])
@@ -204,6 +207,7 @@ def save_settings_to_file():
         "naming_screenshot_filename_pattern": st.session_state.naming_screenshot_filename_pattern,
         "naming_nfo_title_pattern": st.session_state.naming_nfo_title_pattern,
         "naming_folder_name_pattern": st.session_state.naming_folder_name_pattern,
+        "editor_show_screenshots": st.session_state.get("editor_show_screenshots", app_settings.DEFAULT_EDITOR_SHOW_SCREENSHOTS),
     }
     try:
         with open(USER_SETTINGS_FILE, 'w', encoding='utf-8') as f:
@@ -239,6 +243,7 @@ def sync_settings_from_file_to_state():
     st.session_state.naming_screenshot_filename_pattern = loaded_settings["naming_screenshot_filename_pattern"]
     st.session_state.naming_nfo_title_pattern = loaded_settings["naming_nfo_title_pattern"]
     st.session_state.naming_folder_name_pattern = loaded_settings["naming_folder_name_pattern"]
+    st.session_state.editor_show_screenshots = loaded_settings.get("editor_show_screenshots", app_settings.DEFAULT_EDITOR_SHOW_SCREENSHOTS)
 
     print(f"  Synced input_dir: {st.session_state.input_dir}")
     print(f"  Synced output_dir: {st.session_state.output_dir}")
@@ -290,6 +295,7 @@ if 'initialized' not in st.session_state:
     st.session_state.naming_screenshot_filename_pattern = loaded_settings.get("naming_screenshot_filename_pattern", app_settings.DEFAULT_NAMING_SCREENSHOT_FILENAME_PATTERN)
     st.session_state.naming_nfo_title_pattern = loaded_settings.get("naming_nfo_title_pattern", app_settings.DEFAULT_NAMING_NFO_TITLE_PATTERN)
     st.session_state.naming_folder_name_pattern = loaded_settings.get("naming_folder_name_pattern", app_settings.DEFAULT_NAMING_FOLDER_NAME_PATTERN)
+    st.session_state.editor_show_screenshots = loaded_settings.get("editor_show_screenshots", app_settings.DEFAULT_EDITOR_SHOW_SCREENSHOTS)
 
 
     if not st.session_state.enabled_scrapers:
@@ -2304,7 +2310,6 @@ def show_crawler_page():
     default_output_placeholder_path = latest_defaults_for_placeholder.get("output_dir", "")
     input_placeholder = f"Default: {default_input_placeholder_path}" if default_input_placeholder_path else "Enter path..."
     output_placeholder = f"Default: {default_output_placeholder_path}" if default_output_placeholder_path else "Enter path..."
-    # --- End placeholder loading ---
 
     with col_in:
         with st.form("input_dir_form_crawler_page"):
@@ -2314,43 +2319,31 @@ def show_crawler_page():
                 help="Folder containing movie files (e.g., ABCD-123.mp4). Set default in Settings.",
                 placeholder=input_placeholder
             )
-
-            # Create columns for the button and the checkbox
             col_btn, col_cb = st.columns([1.5, 1]) 
-
             with col_btn:
-                # Button with default size
                 submitted_input = st.form_submit_button("Run Crawlers")
-
             with col_cb:
-                # Ensure key exists before accessing
                 if "recursive_scan_active" not in st.session_state: st.session_state.recursive_scan_active = False
                 st.checkbox("Recursive Scan", key="recursive_scan_active", value=st.session_state.recursive_scan_active,
                             help="Scans Input Directory and all subfolders. Save & Organize will use existing folders as basis.")
-
-            # The callback trigger remains outside the columns but inside the form
             if submitted_input:
                 process_input_dir_callback()
 
     with col_out:
-        # Output directory input is now only relevant if NOT doing a recursive scan
         output_dir_help_text = ("Folder where organized movie folders will be created (if Recursive Scan is OFF). Set default in Settings."
                                 if not st.session_state.get("last_crawl_was_recursive", False)
                                 else "Output Directory (Ignored when Recursive Scan was used for crawling).")
         output_dir_disabled = st.session_state.get("last_crawl_was_recursive", False)
-
         with st.form("output_dir_form_crawler_page"):
             st.text_input(
                 "Output Directory",
                 key="output_dir",
                 help=output_dir_help_text,
                 placeholder=output_placeholder,
-                disabled=output_dir_disabled # Disable if last crawl was recursive
+                disabled=output_dir_disabled
             )
-            # Add hint if disabled
             if output_dir_disabled:
                 st.caption("Output Directory ignored because last crawl used 'Recursive Scan'. Output will be placed next to original files.")
-
             organize_button_label = "Save & Organize" + (" (Recursive Mode)" if st.session_state.get("last_crawl_was_recursive", False) else "")
             submitted_output = st.form_submit_button(organize_button_label)
             if submitted_output: organize_all_callback()
@@ -2375,28 +2368,27 @@ def show_crawler_page():
                         st.session_state.current_movie_key = valid_keys[0] if valid_keys else None
                         current_index = 0
                         if st.session_state.current_movie_key: st.session_state._apply_changes_triggered = False
+                
+                if "temp_show_screenshots_for_current_movie" not in st.session_state:
+                    st.session_state.temp_show_screenshots_for_current_movie = False
 
                 nav_col_prev, nav_col_next, nav_col_counter, nav_col_dropdown, nav_col_rescrape = st.columns([1, 1, 0.8, 3, 1.5]) 
-
                 with nav_col_prev: 
                     st.button("Previous", on_click=go_previous_movie, disabled=(current_index == 0 or not st.session_state.current_movie_key), use_container_width=True)
                 with nav_col_next: 
                     st.button("Next", on_click=go_next_movie, disabled=(current_index >= len(valid_keys) - 1 or not st.session_state.current_movie_key), use_container_width=True)
-                
                 with nav_col_counter:
                     if valid_keys:
                         st.markdown(
                             f"<div style='text-align: center; margin-top: 8px; font-size: 0.9em;'>{current_index + 1} / {len(valid_keys)}</div>", 
                             unsafe_allow_html=True
                         )
-                    else:
-                        st.empty()
-
                 def update_current_movie_selection():
                     st.session_state.current_movie_key = st.session_state.movie_selector
                     st.session_state._apply_changes_triggered = False 
+                    st.session_state.temp_show_screenshots_for_current_movie = False 
 
-                with nav_col_dropdown: # Column for the movie selector dropdown
+                with nav_col_dropdown: 
                     st.selectbox("Select Movie:",
                                  options=valid_keys,
                                  format_func=lambda fp: movie_options.get(fp, "Unknown File"),
@@ -2405,26 +2397,20 @@ def show_crawler_page():
                                  on_change=update_current_movie_selection, 
                                  label_visibility="collapsed",
                                  disabled=(not valid_keys))
-                
-                with nav_col_rescrape: # New column for the Re-Scrape button
-                    if st.button("Manual Re-Crawl", key="open_rescrape_dialog_nav_button", use_container_width=True): # Keep help short
+                with nav_col_rescrape: 
+                    if st.button("Manual Re-Crawl", key="open_rescrape_dialog_nav_button", use_container_width=True): 
                         if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
                             st.session_state.show_rescrape_dialog_actual = True
                             st.rerun()
                         else:
                             st.toast("Please select a movie first.", icon="ℹ️")
-
-
-                # --- Display Contributing Scrapers ---
                 if st.session_state.current_movie_key: 
                     data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
                     field_sources = data.get('_field_sources', {}) 
                     if field_sources: 
                         contributing_scrapers = sorted(list(set(field_sources.values())))
                         if contributing_scrapers: st.caption(f"**Sources:** {', '.join([f'**`{s}`**' for s in contributing_scrapers])}")
-                        else: st.caption("No specific field sources recorded.")
                     elif data.get('source') == 'manual': st.caption("**Source:** Manual Entry (No scrapers found data)")
-                    else: st.caption("Field source information not available.")
             else:
                 st.warning("Movie data dictionary is empty or invalid.")
         elif st.session_state.movie_file_paths:
@@ -2432,11 +2418,10 @@ def show_crawler_page():
         else:
             st.info("Enter an Input Directory above and click 'Run Crawlers'.")
 
-        # --- Dialog Invocation Logic (should be checked on every run if flag could be set from nav) ---
-        if 'show_rescrape_dialog_actual' not in st.session_state: # Ensure flag exists
+        if 'show_rescrape_dialog_actual' not in st.session_state: 
             st.session_state.show_rescrape_dialog_actual = False
         if st.session_state.get("show_rescrape_dialog_actual"):
-            rescrape_dialog() # This function now manages closing itself by setting the flag
+            rescrape_dialog() 
 
         # --- Editor Form ---
         if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
@@ -2444,7 +2429,6 @@ def show_crawler_page():
             if apply_changes_was_triggered:
                 st.session_state._apply_changes_triggered = False
             else:
-                # --- Pre-populate session state for editor widgets ---
                 data = st.session_state.all_movie_data[st.session_state.current_movie_key]
                 def to_str(val): return str(val) if val is not None else ""
                 st.session_state.editor_id = to_str(data.get('id'))
@@ -2470,27 +2454,26 @@ def show_crawler_page():
                 if default_poster_input_url is None: default_poster_input_url = auto_poster_url or ''
                 st.session_state.editor_poster_url = to_str(default_poster_input_url)
                 st.session_state._original_editor_poster_url = st.session_state.editor_poster_url
-                # --- End Pre-population Block ---
             
-            # Note: 'show_rescrape_dialog_actual' initialization is now above the editor form,
-            # because the button triggering it is now in the navigation area.
-
             with st.form(key="editor_form"):
                 img_col, text_col = st.columns([1.2, 2])
-
                 with img_col:
-                    display_poster_url = st.session_state.get('editor_poster_url', '')
-                    if display_poster_url:
-                        data_for_display = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
+                    display_poster_url_from_editor_field = st.session_state.get('editor_poster_url', '') 
+                    current_movie_data_for_poster = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {})
+                    source_page_url_for_poster_referer = current_movie_data_for_poster.get('url', '') 
+                    if display_poster_url_from_editor_field:
                         try:
-                            abs_display_poster_url = urljoin(data_for_display.get('url', ''), display_poster_url)
-                            source_lower = data_for_display.get('source', '').lower()
+                            abs_display_poster_url = urljoin(source_page_url_for_poster_referer, display_poster_url_from_editor_field)
+                            # Directly use st.image with the URL
+                            source_lower = current_movie_data_for_poster.get('source', '').lower()
                             if source_lower.startswith('r18') or source_lower.startswith('mgs') or source_lower == 'manual':
                                 st.image(abs_display_poster_url, caption="Poster Preview")
                             else:
                                 st.image(abs_display_poster_url, use_container_width=True, caption="Poster Preview")
-                        except Exception as img_e: st.warning(f"Could not load poster preview: {img_e}")
-                    else: st.info("No poster image URL provided. Add one below.")
+                        except Exception as img_e: # Catch potential errors from st.image (e.g., network, invalid URL)
+                            st.warning(f"Could not load poster preview: {img_e}")
+                    else:
+                        st.info("No poster image URL provided. Add one below.")
 
                 with text_col:
                     id_col1, id_col2 = st.columns(2);
@@ -2513,20 +2496,12 @@ def show_crawler_page():
                         st.text_input("Genres", key="editor_genres");
                         st.text_input("Actresses", key="editor_actresses")
                     st.text_input("Cover", key="editor_poster_url")
-
-                    # Apply Changes button (the actual form submit button)
-                    # REMOVED use_container_width=True to revert its size
                     apply_changes_submitted = st.form_submit_button(
                         "🖊️ Apply Changes",
                         on_click=apply_changes_callback 
                     )
-            # --- End of st.form() context ---
-
-            # The columns for action buttons after the form are no longer needed here,
-            # as the Re-Scrape button has been moved to the navigation area.
-
-            # --- Per-Movie Checkbox (Unchanged) ---
-            data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {}) # Re-fetch data
+            
+            data = st.session_state.all_movie_data.get(st.session_state.current_movie_key, {}) 
             checkbox_key = f"cb_download_all_{st.session_state.current_movie_key}"
             st.checkbox( "Download all images for this movie",
                          value=data.get('download_all', False),
@@ -2534,52 +2509,87 @@ def show_crawler_page():
                          on_change=update_download_all_flag,
                          help="Downloads fanart (poster) and images. Folder image is always generated from fanart.")
 
-            # --- Additional Images display (Unchanged) ---
-            # ... (Your existing screenshot display logic) ...
-            screenshots = data.get('screenshot_urls', [])
-            if screenshots:
-                auto_poster_url_display = get_auto_poster_url(data)
-                actual_poster_url_displayed = data.get('poster_manual_url', auto_poster_url_display)
-                screenshots_to_display = [ ss_url for ss_url in screenshots if ss_url and ss_url != actual_poster_url_displayed]
-                if screenshots_to_display:
-                    num_screenshots = len(screenshots_to_display); num_cols = min(num_screenshots, 4);
-                    if num_cols > 0:
-                        cols_imgs = st.columns(num_cols);
-                        field_sources = data.get('_field_sources', {})
-                        screenshots_list_source = field_sources.get('screenshot_urls')
-                        overall_source = data.get('source', '').lower()
-                        no_stretch = False
-                        if screenshots_list_source in ['r18dev', 'r18dev Ja']: no_stretch = True
-                        elif overall_source == 'mgs': no_stretch = True
-                        elif screenshots_list_source is None and overall_source.startswith('r18'): no_stretch = True
-                        elif overall_source == 'manual': no_stretch = True
-                        for idx, img_url in enumerate(screenshots_to_display):
-                             with cols_imgs[idx % num_cols]:
-                                 try:
-                                     abs_ss_url = urljoin(data.get('url', ''), img_url)
-                                     if no_stretch: st.image(abs_ss_url, caption=f"Image {idx+1}")
-                                     else: st.image(abs_ss_url, use_container_width=True, caption=f"Image {idx+1}")
-                                 except Exception as ss_e: st.warning(f"Image {idx+1} error: {ss_e}")
-            elif 'screenshot_urls' in data and not data['screenshot_urls']:
-                 if data.get('poster_manual_url') or data.get('cover_url'):
-                     st.info("Additional images list is empty. This could be due to a manual Poster URL change, no scraped screenshots, or if the poster was the only image.")
-                 else: st.info("No images (poster or screenshots) available for this movie.")
+            global_show_screenshots = st.session_state.get("editor_show_screenshots", True)
+            temp_show_screenshots = st.session_state.get("temp_show_screenshots_for_current_movie", False)
+            
+            show_screenshots_for_this_movie = global_show_screenshots or temp_show_screenshots
+
+            if not global_show_screenshots:
+                st.checkbox(
+                    "Show additional images",
+                    value=temp_show_screenshots, 
+                    key="temp_show_screenshots_for_current_movie", 
+                    help="Temporarily display additional images."
+                )
+
+            if show_screenshots_for_this_movie:
+                screenshots = data.get('screenshot_urls', [])
+                source_page_url_for_ss_referer = data.get('url', '') 
+
+                if screenshots:
+                    auto_poster_url_display = get_auto_poster_url(data)
+                    actual_poster_url_displayed = data.get('poster_manual_url', auto_poster_url_display)
+                    
+                    screenshots_to_display = [
+                        ss_url for ss_url in screenshots 
+                        if ss_url and ss_url != actual_poster_url_displayed 
+                    ]
+
+                    if screenshots_to_display:
+                        num_screenshots = len(screenshots_to_display)
+                        num_cols = min(num_screenshots, 4) 
+                        
+                        if num_cols > 0:
+                            cols_imgs = st.columns(num_cols)
+                            field_sources = data.get('_field_sources', {})
+                            screenshots_list_source = field_sources.get('screenshot_urls')
+                            overall_source = data.get('source', '').lower()
+                            no_stretch = False 
+                            if screenshots_list_source in ['r18dev', 'r18dev Ja']: no_stretch = True
+                            elif overall_source == 'mgs': no_stretch = True
+                            elif screenshots_list_source is None and overall_source.startswith('r18'): no_stretch = True
+                            elif overall_source == 'manual': no_stretch = True
+
+                            for idx, img_url_relative in enumerate(screenshots_to_display):
+                                 with cols_imgs[idx % num_cols]:
+                                     try:
+                                         abs_ss_url = urljoin(source_page_url_for_ss_referer, img_url_relative)
+                                         if no_stretch:
+                                             st.image(abs_ss_url, caption=f"Image {idx+1}")
+                                         else:
+                                             st.image(abs_ss_url, use_container_width=True, caption=f"Image {idx+1}")
+                                     except Exception as ss_e: 
+                                         st.warning(f"Image {idx+1} ({os.path.basename(img_url_relative)}) error: {ss_e}")
+                    elif 'screenshot_urls' in data and not data['screenshot_urls']:
+                         if data.get('poster_manual_url') or data.get('cover_url'):
+                             st.info("Additional images list is empty. This could be due to a manual Poster URL change, no scraped screenshots, or if the poster was the only image.")
+                         else: st.info("No images (poster or screenshots) available for this movie.")
+                    else: 
+                        st.info("No screenshot data found for this movie.")
+
+                elif 'screenshot_urls' in data and not data['screenshot_urls']:
+                     if data.get('poster_manual_url') or data.get('cover_url'):
+                         st.info("Screenshots list is empty. This could be due to a manual Poster URL change, no scraped screenshots, or if the poster was the only image.")
+                     else: st.info("No images (poster or screenshots) available for this movie.")
+                else: 
+                    st.info("No screenshot information available for this movie.")
+
+            elif not global_show_screenshots and not temp_show_screenshots: 
+                st.info("Additional images display is turned off in Settings. Toggle above to see them.")
         # --- End Editor Form conditional block ---
 
     elif st.session_state.crawler_view == "Raw Data":
         st.subheader("Processed Movie Data")
         if st.session_state.current_movie_key and st.session_state.current_movie_key in st.session_state.all_movie_data:
             current_movie_data = st.session_state.all_movie_data[st.session_state.current_movie_key]
-            # Display full path if last crawl was recursive
             display_key_name = (st.session_state.current_movie_key
                                 if st.session_state.get("last_crawl_was_recursive", False)
                                 else os.path.basename(st.session_state.current_movie_key))
             st.caption(f"Displaying processed data for: {display_key_name}")
-            # Display a copy, removing fields we no longer handle internally
             display_data = current_movie_data.copy()
             display_data.pop('folder_url', None)
             display_data.pop('folder_image_constructed_url', None)
-            display_data.pop('folder_manual_url', None) # Remove this from display too
+            display_data.pop('folder_manual_url', None) 
             st.json(display_data, expanded=True)
         elif st.session_state.all_movie_data:
              st.info("Select a movie in the 'Editor' view to see its processed data here.")
@@ -2696,6 +2706,15 @@ def show_settings_page():
         with trans_row2_col2:
             st.checkbox("Translate Description", key="translate_description")
             st.checkbox("Keep Original Description", key="keep_original_description", help="If 'Translate Description' is also checked, appends translation below original text.")
+
+        st.divider()
+
+        st.subheader("Additional Images") # Or a more appropriate subheader
+        st.checkbox(
+            "Show additional images in Editor view",
+            key="editor_show_screenshots", # Uses the value from session_state if key exists
+            help="If unchecked, additional images will not be displayed in the movie editor"
+        )
 
         st.divider()
 
