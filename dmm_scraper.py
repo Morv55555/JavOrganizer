@@ -431,7 +431,11 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
                 elif re.search(r'出演者|Performers|女優', key, re.IGNORECASE):
                     actress_list = [];
                     for link in value_links:
-                        if link.get('href') and ('/article=actress/' in link['href'] or '/list/=/article=actress/' in link['href']):
+                        href = link.get('href')
+                        if (href and 
+                            ('/article=actress/' in href or 
+                            '/list/=/article=actress/' in href or
+                            '/digital/videoa/-/list/?actress=' in href)):
                             name = link.text.strip()
                             if name and name not in PLACEHOLDERS and name not in ['▼すべて表示する', 'See All']: actress_list.append({'name': name})
                     if actress_list: data['actresses'] = actress_list
@@ -582,7 +586,7 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.DEBUG) # Set root logger to DEBUG
     logging.info("Running dmm_scraper.py directly for testing with DEBUG logging...")
-    test_ids_to_check = ["ABF-118", "ABF-218", "DASS-603", "MKCK-510", "GARA-009"] # Added GARA-009
+    test_ids_to_check = ["ABF-118", "ABF-218", "DASS-603", "MKCK-510", "GARA-009", "MIDA-039"]
 
     for test_id in test_ids_to_check:
         print(f"\n" + "="*10 + f" Testing ID: {test_id} " + "="*10)
