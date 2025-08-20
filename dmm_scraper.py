@@ -6,6 +6,7 @@ import re
 import logging
 import json
 from urllib.parse import urljoin
+from lxml import html
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] %(message)s')
@@ -70,7 +71,7 @@ def get_id(content_id):
     else:
         # Fallback if standard pattern doesn't match after cleaning
         fallback_id = cleaned_cid_for_id.upper()
-        logging.debug(f"Standard pattern didn't match, using fallback: {fallback_id}")
+        logging.debug(f"Standard pattern didn\'t match, using fallback: {fallback_id}")
         return fallback_id
 
 
@@ -231,7 +232,8 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
     except requests.exceptions.RequestException as e: logging.error(f"Failed to retrieve DMM page '{url}': {e}"); return None
 
     html_content = response.text
-    soup = BeautifulSoup(html_content, 'html.parser')
+    soup = BeautifulSoup(html_content, 'lxml')
+    tree = html.fromstring(html_content)
     data = {}
     data['source'] = 'dmm_en' if '/en/' in url else 'dmm_jp'
     data['url'] = url
@@ -239,7 +241,13 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
     data['id'] = get_id(data['content_id'])
 
     # --- Title ---
-    title_tag = soup.select_one('h1#title'); scraped_title = title_tag.text.strip() if title_tag else None
+    title_tag = soup.select_one('h1#title')
+    scraped_title = title_tag.text.strip() if title_tag else None
+    if not scraped_title:
+        title_element = tree.xpath('/html/body/div/main/div/div[2]/div/div[1]/h1/span/text()')
+        if title_element:
+            scraped_title = title_element[0].strip()
+
     data['title'] = scraped_title; data['title_raw'] = scraped_title; data['originaltitle'] = scraped_title
     logging.debug(f"Scraped Title: {data['title']}")
 
@@ -249,13 +257,13 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
     if json_ld_script:
         try:
             # Basic cleaning first
-            json_content = json_ld_script.string.replace('\\"', '"').replace('\\n', ' ').replace('\\/', '/')
+            json_content = json_ld_script.string.replace('"', '"').replace('\n', ' ').replace('\\/', '/')
             json_data = json.loads(json_content)
             if isinstance(json_data, list): json_data = json_data[0] # Handle list wrapper
             if isinstance(json_data, dict): # Ensure it's a dict
                 desc = json_data.get('description')
                 if desc and isinstance(desc, str): # Check if key exists and is string
-                    # Don't need replace('\\', '') here if done before parsing
+                    # Don't need replace('\', '') here if done before parsing
                     cleaned_desc = re.sub(r'\s+', ' ', desc).strip() # Consolidate whitespace
                     if cleaned_desc and cleaned_desc not in PLACEHOLDERS:
                          data['description'] = cleaned_desc
@@ -387,7 +395,7 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
                  if re.search(r'発売日|配信開始日|Release Date', key, re.IGNORECASE):
                      date_match = re.search(r'(\d{4}/\d{2}/\d{2})', value_cell.get_text())
                      if date_match: date_str = date_match.group(1); data['release_date'] = date_str.replace('/', '-') if date_str not in PLACEHOLDERS else None
-                 elif re.search(r'収録時間|Duration', key, re.IGNORECASE):
+                 elif re.search(r' 収録時間|Duration', key, re.IGNORECASE):
                      runtime_match = re.search(r'(\d+)\s*(分|min)', value_text)
                      if runtime_match: runtime_val = runtime_match.group(1); data['runtime'] = runtime_val if runtime_val not in PLACEHOLDERS else None
     # Fallback searches if not found in table
@@ -432,7 +440,7 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
                     actress_list = [];
                     for link in value_links:
                         href = link.get('href')
-                        if (href and 
+                        if (
                             ('/article=actress/' in href or 
                             '/list/=/article=actress/' in href or
                             '/digital/videoa/-/list/?actress=' in href)):
@@ -451,13 +459,44 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
                          if name and name not in PLACEHOLDERS: genre_list.append(name)
                      if genre_list: data['genres'] = genre_list
             # else: logging.debug(f"Table Row {row_idx}: Skipping, not 2 cells.") # Uncomment if needed
-    else: logging.warning("Info table not found. Director, Maker, etc., might be missing.")
+    else:
+        logging.warning("Info table not found. Using XPath fallbacks for Director, Maker, etc.")
+        # Fallback for Director
+        director_element = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[6]/td/span/div/a/text()')
+        if director_element:
+            data['director'] = director_element[0].strip()
+
+        # Fallback for Maker/Studio
+        maker_element = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[8]/td/span/a/text()')
+        if maker_element:
+            data['maker'] = maker_element[0].strip()
+
+        # Fallback for Label
+        label_element = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[9]/td/span/a/text()')
+        if label_element:
+            data['label'] = label_element[0].strip()
+
+        # Fallback for Series
+        series_element = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[7]/td/span/a/text()')
+        if series_element:
+            data['series'] = series_element[0].strip()
+
+        # Fallback for Genre
+        genre_elements = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[10]/td/span/div//a/text()')
+        if genre_elements:
+            data['genres'] = [genre.strip() for genre in genre_elements]
+
+        # Fallback for Actress
+        actress_elements = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[1]/div[2]/table/tbody/tr[5]/td/span/div//a/text()')
+        if actress_elements:
+            data['actresses'] = [{'name': actress.strip()} for actress in actress_elements]
+
 
     # --- AJAX Fallback for Actresses ---
     if not data.get('actresses'):
         logging.debug("Actresses not found in table, checking for AJAX pattern...")
         ajax_match = re.search(r'"(/digital/video[a-z]?/-/detail/ajax-performer/=/cid=\w+/)"', html_content)
-        if not ajax_match: ajax_match = re.search(r'"(/digital/videoa/-/detail/ajax-performer/=/data=[^"]*)"', html_content)
+        if not ajax_match: ajax_match = re.search(r'"(/digital/videoa/-/detail/ajax-performer/=/data=[^\"]*)"', html_content)
         if ajax_match:
             ajax_url_path = ajax_match.group(1)
             if ajax_url_path.startswith('/'):
@@ -542,28 +581,25 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
 
     # --- Screenshots ---
     data['screenshot_urls'] = []
-    sample_container = soup.select_one('#sample-image-block, div.product-info__sample-images, ul#sampleImageList')
-    sample_links = []
-    if sample_container: sample_links = sample_container.find_all('a', href=re.compile(r'pics\.dmm\.co\.jp.*\.(jpg|jpeg)', re.IGNORECASE))
-    if not sample_links: sample_links = soup.find_all('a', attrs={'name': re.compile(r'^sample-image')}, href=re.compile(r'pics\.dmm\.co\.jp.*\.(jpg|jpeg)', re.IGNORECASE))
-    processed_thumbs = set()
-    for link in sample_links:
-        img = link.find('img', src=re.compile(r'pics\.dmm\.co\.jp'));
-        if img and img.get('src'):
-            thumb_src = img['src'];
-            if thumb_src in processed_thumbs: continue
-            processed_thumbs.add(thumb_src)
-            # Try to derive the full-size image URL from the thumbnail (common pattern)
-            full_size_src = re.sub(r'/([a-zA-Z0-9_]+)-(\d+\.jpg)$', r'/\1jp-\2', thumb_src)
-            if full_size_src != thumb_src: # If replacement happened, use it
-                data['screenshot_urls'].append(full_size_src)
-            else: # Otherwise, check link's href or use thumb itself
-                link_href = link.get('href')
-                if link_href and 'pics.dmm.co.jp' in link_href and re.search(r'\.jpe?g$', link_href, re.IGNORECASE):
-                     data['screenshot_urls'].append(link_href)
-                else:
-                     data['screenshot_urls'].append(thumb_src) # Fallback to thumb
-                     logging.debug(f"  Could not derive full size from thumb '{thumb_src}', using thumb/href as fallback.")
+    screenshot_elements = tree.xpath('//*[@id="sample-image-block"]/div/div//li/a/img/@src')
+    if screenshot_elements:
+        data['screenshot_urls'] = [url.strip().replace('ps.jpg', 'pl.jpg') for url in screenshot_elements]
+
+    if not data['screenshot_urls']:
+        screenshot_elements = tree.xpath('/html/body/div[1]/main/div/div[2]/div/div[2]/div[1]/div[3]/div/div[2]//a/@href')
+        if screenshot_elements:
+            data['screenshot_urls'] = [url.strip() for url in screenshot_elements]
+            
+    if not data['screenshot_urls']:
+        i = 1
+        while True:
+            screenshot_element = tree.xpath(f'//*[@id="package-image{i}"]/img/@src')
+            if screenshot_element:
+                data['screenshot_urls'].append(screenshot_element[0].strip().replace('ps.jpg', 'pl.jpg'))
+                i += 1
+            else:
+                break
+
     # Remove duplicates and sort
     data['screenshot_urls'] = sorted(list(set(data['screenshot_urls'])))
     logging.debug(f"Found {len(data['screenshot_urls'])} unique Screenshot URLs.")
@@ -586,35 +622,23 @@ def scrape_dmm(url, scrape_actress=False): # scrape_actress argument is not used
 if __name__ == "__main__":
     logging.getLogger().setLevel(logging.DEBUG) # Set root logger to DEBUG
     logging.info("Running dmm_scraper.py directly for testing with DEBUG logging...")
-    test_ids_to_check = ["ABF-118", "ABF-218", "DASS-603", "MKCK-510", "GARA-009", "MIDA-039"]
+    test_ids_to_check = ["ABF-118", "ABF-218", "DASS-603", "MKCK-510", "GARA-009", "ADN-588"]
 
-    for test_id in test_ids_to_check:
-        print(f"\n" + "="*10 + f" Testing ID: {test_id} " + "="*10)
-        url = get_dmm_url_from_id(test_id)
-        if url:
-            print(f"RESULT: Found URL: {url}")
-            print(f"\n>>> Testing Scraper with URL: {url} <<<")
-            scraped_data = scrape_dmm(url)
-            if scraped_data:
-                print(f"RESULT: Scraped data:")
-                print(f"  ID (Formatted): {scraped_data.get('id')}")
-                print(f"  Content ID (Raw): {scraped_data.get('content_id')}")
-                print(f"  Title: {scraped_data.get('title')}")
-                print(f"  Release Date: {scraped_data.get('release_date')}")
-                print(f"  Runtime: {scraped_data.get('runtime')}")
-                print(f"  Director: {scraped_data.get('director')}")
-                print(f"  Maker: {scraped_data.get('maker')}")
-                print(f"  Label: {scraped_data.get('label')}")
-                print(f"  Series: {scraped_data.get('series')}") # Check this output
-                print(f"  Set: {scraped_data.get('set')}")       # Check this derived output
-                print(f"  Actresses: {scraped_data.get('actresses')}")
-                print(f"  Genres: {scraped_data.get('genres')}")
-                print(f"  Cover URL: {scraped_data.get('cover_url')}") # Check this - should prioritize AWS now
-                # print(f"  Folder URL (Validated): {scraped_data.get('folder_image_constructed_url')}") # Removed this line
-                print(f"  Screenshot URLs: {len(scraped_data.get('screenshot_urls', []))} found")
-
-            else: print(f"RESULT: Could not scrape data for URL: {url}")
-        else: print(f"RESULT: Could not find URL for {test_id}.")
-        print("-" * (20 + len(test_id) + 20))
+    with open("output.txt", "w", encoding="utf-8") as f:
+        for test_id in test_ids_to_check:
+            f.write(f"\n" + "="*10 + f" Testing ID: {test_id} " + "="*10 + "\n")
+            url = get_dmm_url_from_id(test_id)
+            if url:
+                f.write(f"RESULT: Found URL: {url}\n")
+                f.write(f"\n>>> Testing Scraper with URL: {url} <<\n")
+                scraped_data = scrape_dmm(url)
+                if scraped_data:
+                    f.write("RESULT: Scraped data:\n")
+                    f.write(json.dumps(scraped_data, indent=2, ensure_ascii=False) + "\n")
+                else:
+                    f.write(f"RESULT: Could not scrape data for URL: {url}\n")
+            else:
+                f.write(f"RESULT: Could not find URL for {test_id}.\n")
+            f.write("-" * (20 + len(test_id) + 20) + "\n")
 
 # END OF FILE dmm_scraper.py
